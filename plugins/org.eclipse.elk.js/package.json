@@ -1,7 +1,7 @@
 {
-  "name": "elk-rs",
+  "name": "@archboard/elk-rs",
   "version": "0.11.0",
-  "description": "ELK layout engine in Rust — elkjs-compatible API with WASM and native Node.js addon",
+  "description": "ELK layout engine in Rust — elkjs-compatible API with WASM and native Node.js addon (fork of openedges/elk-rs)",
   "license": "EPL-2.0",
   "main": "js/index.js",
   "browser": "js/index.browser.js",
@@ -11,44 +11,54 @@
       "browser": "./js/index.browser.js",
       "default": "./js/index.js"
     },
+    "./js/elk-api.js": "./js/elk-api.js",
+    "./js/elk-worker.js": "./js/elk-worker.js",
     "./package.json": "./package.json"
   },
   "files": [
     "js/",
     "dist/wasm/",
     "typings/",
-    "LICENSE",
+    "LICENSE.md",
+    "NOTICE",
     "README.md"
   ],
   "scripts": {
-    "build": "sh build.sh",
+    "build": "bash build.sh",
     "test": "vitest run",
     "test:parity": "node test/parity/run.mjs",
     "bench": "node bench/bench.mjs --mode synthetic",
     "bench:models": "node bench/bench.mjs --mode models",
-    "bench:all": "node bench/bench.mjs --mode models --limit 0"
+    "bench:all": "node bench/bench.mjs --mode models --limit 0",
+    "npm:stage:platform": "bun scripts/stage-platform-package.ts",
+    "npm:stage:root": "bun scripts/stage-root-package.ts",
+    "npm:publish": "bun scripts/publish-npm.ts",
+    "npm:publish:dry-run": "bun scripts/publish-npm.ts --dry-run"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/openedges/elk-rs.git",
+    "url": "git+https://github.com/miklschmidt/elk-rs.git",
     "directory": "plugins/org.eclipse.elk.js"
   },
-  "homepage": "https://github.com/openedges/elk-rs",
-  "bugs": "https://github.com/openedges/elk-rs/issues",
+  "homepage": "https://github.com/miklschmidt/elk-rs/tree/archboard/plugins/org.eclipse.elk.js#readme",
+  "bugs": "https://github.com/miklschmidt/elk-rs/issues",
   "engines": {
     "node": ">=16"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "devDependencies": {
     "elkjs": "^0.11.0",
     "vitest": "^3.0.0"
   },
   "optionalDependencies": {
-    "@elk-rs/darwin-arm64": "0.11.0",
-    "@elk-rs/darwin-x64": "0.11.0",
-    "@elk-rs/linux-x64-gnu": "0.11.0",
-    "@elk-rs/linux-x64-musl": "0.11.0",
-    "@elk-rs/linux-arm64-gnu": "0.11.0",
-    "@elk-rs/win32-x64-msvc": "0.11.0"
+    "@archboard/elk-rs-darwin-arm64": "0.11.0",
+    "@archboard/elk-rs-darwin-x64": "0.11.0",
+    "@archboard/elk-rs-linux-x64-gnu": "0.11.0",
+    "@archboard/elk-rs-linux-x64-musl": "0.11.0",
+    "@archboard/elk-rs-linux-arm64-gnu": "0.11.0",
+    "@archboard/elk-rs-win32-x64-msvc": "0.11.0"
   },
   "keywords": [
     "elk",

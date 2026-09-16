@@ -1,50 +1,44 @@
 'use strict';
 
 /**
- * elk-rs Worker script — runs in Web Worker or Node.js worker_threads.
+ * elk-rs Worker script — runs in Web Worker or Node.js/Bun worker_threads.
  *
- * Loads the WASM module and handles the elkjs-compatible message protocol.
+ * Loads a backend and handles the elkjs-compatible message protocol.
  * Also exports a `Worker` class for in-process use (like elkjs's fake worker).
+ *
+ * Loading this file on a main thread (Node.js, Bun or a browser window)
+ * installs no message handler: only the `Worker` export is meant for use there.
  */
 
-// Detect environment
-var isWebWorker = typeof self !== 'undefined' && typeof self.postMessage === 'function' && typeof window === 'undefined';
+// --- Where this script runs ---
 
-// --- Platform detection (shared with index.js) ---
-
-function platformTriple() {
-  var platform = process.platform;
-  var arch = process.arch;
-  var tripleMap = {
-    'darwin-arm64': 'darwin-arm64',
-    'darwin-x64': 'darwin-x64',
-    'linux-x64': 'linux-x64-gnu',
-    'linux-arm64': 'linux-arm64-gnu',
-    'win32-x64': 'win32-x64-msvc',
-  };
-  var key = platform + '-' + arch;
-  return tripleMap[key] || null;
+/** The parent port when this script runs in a Node.js or Bun worker thread, else null. */
+function workerThreadParentPort() {
+  try {
+    var wt = require('worker_threads');
+    if (!wt.isMainThread && wt.parentPort) {
+      return wt.parentPort;
+    }
+  } catch (e) { /* not Node.js or Bun */ }
+  return null;
 }
 
-function loadNativeAddon() {
-  var triple = platformTriple();
-  // 1. Try platform-specific NAPI package
-  if (triple) {
-    try { return require('@elk-rs/' + triple); } catch (e) {}
+/**
+ * Whether this script runs in a Web Worker. Bun's main thread also exposes
+ * `self.postMessage` without a `window`, so only a real worker global scope counts.
+ */
+function isWebWorkerScope() {
+  if (typeof Bun !== 'undefined' && Bun.isMainThread) {
+    return false;
   }
-  // 2. Try platform-specific local .node file
-  if (triple) {
-    try { return require('../dist/elk-rs.' + triple + '.node'); } catch (e) {}
-  }
-  // 3. Try generic local .node file
-  try { return require('../dist/elk-rs.node'); } catch (e) {}
-  return null;
+  return typeof WorkerGlobalScope !== 'undefined'
+    && typeof self !== 'undefined'
+    && self instanceof WorkerGlobalScope;
 }
 
 // --- In-process (fake) Worker for Node.js direct use ---
 
 function FakeWorker() {
-  var _this = this;
   this._backend = null;
   this._initPromise = null;
 }
@@ -56,16 +50,8 @@ FakeWorker.prototype._ensureBackend = function() {
   var self = this;
   this._initPromise = new Promise(function(resolve, reject) {
     try {
-      var backend = loadNativeAddon();
-      if (!backend) {
-        try {
-          backend = require('../dist/wasm/org_eclipse_elk_wasm.js');
-        } catch (e2) {
-          throw new Error('elk-rs: Could not load native addon or WASM module.');
-        }
-      }
-      self._backend = backend;
-      resolve(backend);
+      self._backend = require('./backend-node.js').loadBackend();
+      resolve(self._backend);
     } catch (err) {
       reject(err);
     }
@@ -145,29 +131,21 @@ function convertError(err) {
 
 // --- Worker mode ---
 
-// Detect Node.js worker_threads (parentPort is available when running as a worker thread)
-var _parentPort = null;
-try {
-  var _wt = require('worker_threads');
-  if (!_wt.isMainThread && _wt.parentPort) {
-    _parentPort = _wt.parentPort;
-  }
-} catch (e) { /* not in Node.js or not a worker thread */ }
+var _parentPort = workerThreadParentPort();
 
 if (_parentPort) {
-  // Node.js worker_threads — use require-based backend loading and parentPort
-  var nodeBackend = loadNativeAddon();
-  if (!nodeBackend) {
-    try {
-      nodeBackend = require('../dist/wasm/org_eclipse_elk_wasm.js');
-    } catch (e2) {
-      // Will report error when messages arrive
-    }
+  // Node.js or Bun worker thread: native addon first, then WASM.
+  var nodeBackend = null;
+  var nodeBackendError = null;
+  try {
+    nodeBackend = require('./backend-node.js').loadBackend();
+  } catch (err) {
+    nodeBackendError = err;
   }
 
   _parentPort.on('message', function(msg) {
     if (!nodeBackend) {
-      _parentPort.postMessage({ id: msg.id, error: { message: 'elk-rs: Could not load backend in worker.' } });
+      _parentPort.postMessage({ id: msg.id, error: convertError(nodeBackendError) });
       return;
     }
     try {
@@ -177,23 +155,16 @@ if (_parentPort) {
       _parentPort.postMessage({ id: msg.id, error: convertError(err) });
     }
   });
-} else if (isWebWorker) {
-  // Pure browser Web Worker — use WASM via dynamic import
-  var wasmBackend = null;
-  var wasmReady = null;
-
-  wasmReady = (function() {
-    return import('../dist/wasm/org_eclipse_elk_wasm.js').then(function(module) {
-      if (module.default && typeof module.default === 'function') {
-        return module.default().then(function() {
-          wasmBackend = module;
-          return module;
-        });
-      }
-      wasmBackend = module;
-      return module;
-    });
-  })();
+} else if (isWebWorkerScope()) {
+  // Browser Web Worker: WASM via dynamic import.
+  var wasmReady = import('../dist/wasm/org_eclipse_elk_wasm.js').then(function(module) {
+    if (module.default && typeof module.default === 'function') {
+      return module.default().then(function() {
+        return module;
+      });
+    }
+    return module;
+  });
 
   self.onmessage = function(e) {
     var msg = e.data;
@@ -202,7 +173,12 @@ if (_parentPort) {
         var result = handleCommand(backend, msg);
         self.postMessage({ id: msg.id, data: result });
       } catch (err) {
-        self.postMessage({ id: msg.id, error: convertError(err) });
+        // A Rust panic traps on WASM; report its message rather than the trap.
+        var panicMessage = null;
+        if (err instanceof WebAssembly.RuntimeError && backend.take_last_layout_panic) {
+          try { panicMessage = backend.take_last_layout_panic(); } catch (e2) { /* trapped */ }
+        }
+        self.postMessage({ id: msg.id, error: panicMessage ? { message: panicMessage } : convertError(err) });
       }
     }).catch(function(err) {
       self.postMessage({ id: msg.id, error: convertError(err) });

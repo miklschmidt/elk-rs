@@ -6,6 +6,8 @@ import { describe, it, expect } from 'vitest';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 
 const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -62,34 +64,45 @@ describe('Entry point', () => {
   });
 
   describe('platform package mapping', () => {
-    // Test that platformTriple() returns the correct triple
-    // by reading the source and checking the mapping table
-    const indexSrc = require('fs').readFileSync(
-      path.join(__dirname, '../js/index.js'), 'utf8'
-    );
+    const backend = require('../js/backend-node.js');
+    const pkg = require('../package.json');
+    const hosts = [
+      ['darwin', 'arm64', false],
+      ['darwin', 'x64', false],
+      ['linux', 'x64', false],
+      ['linux', 'x64', true],
+      ['linux', 'arm64', false],
+      ['win32', 'x64', false],
+    ];
 
-    it('should define triples for all supported platforms', () => {
-      const triples = [
-        'darwin-arm64',
-        'darwin-x64',
-        'linux-x64-gnu',
-        'linux-arm64-gnu',
-        'win32-x64-msvc',
-      ];
-      for (const triple of triples) {
-        expect(indexSrc).toContain("'" + triple + "'");
+    it('resolves every supported host to exactly the optional platform packages', () => {
+      const resolved = hosts.map(([platform, arch, musl]) =>
+        backend.platformPackageName(backend.platformTriple(platform, arch, musl)));
+      expect(new Set(resolved)).toEqual(new Set(Object.keys(pkg.optionalDependencies)));
+    });
+
+    it('pins every optional platform package to the package version', () => {
+      for (const version of Object.values(pkg.optionalDependencies)) {
+        expect(version).toBe(pkg.version);
       }
     });
 
-    it('should try platform package before local .node and WASM', () => {
-      // Verify the loading order in source: @elk-rs/ package -> platform .node -> generic .node -> WASM
-      const pkgIdx = indexSrc.indexOf("'@elk-rs/'");
-      const platformLocalIdx = indexSrc.indexOf("'../dist/elk-rs.'");
-      const genericLocalIdx = indexSrc.indexOf("'../dist/elk-rs.node'");
-      const wasmIdx = indexSrc.indexOf("../dist/wasm/org_eclipse_elk_wasm.js");
-      expect(pkgIdx).toBeLessThan(platformLocalIdx);
-      expect(platformLocalIdx).toBeLessThan(genericLocalIdx);
-      expect(genericLocalIdx).toBeLessThan(wasmIdx);
+    it('prefers an installed platform package over a local build and WASM', async () => {
+      const root = mkdtempSync(path.join(tmpdir(), 'elk-rs-platform-pkg-'));
+      try {
+        cpSync(path.join(__dirname, '../js'), path.join(root, 'js'), { recursive: true });
+        const name = backend.platformPackageName(backend.platformTriple());
+        const dir = path.join(root, 'node_modules', ...name.split('/'));
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name, main: 'index.js' }));
+        writeFileSync(path.join(dir, 'index.js'),
+          'exports.layout_json = () => JSON.stringify({ id: "from-platform-package" });');
+        const ELK = require(path.join(root, 'js/index.js'));
+        const out = await new ELK().layout(graph);
+        expect(out.id).toBe('from-platform-package');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
     });
   });
 
