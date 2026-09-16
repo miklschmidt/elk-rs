@@ -1,0 +1,220 @@
+name: Publish npm
+
+# Builds the native addon for every platform package and the WASM build,
+# stages @archboard/elk-rs and its @archboard/elk-rs-<triple> packages, tests
+# them, and publishes them through npm trusted publishing (no token).
+#
+# - workflow_dispatch with dry_run (default true): build, test, stage and
+#   `bun publish --dry-run` every package; nothing is published.
+# - workflow_dispatch with dry_run false, or a pushed tag v<version>: the same,
+#   then publish from the `npm-publish` environment.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build, test and pack every package without publishing
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-npm-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PACKAGE_DIR: plugins/org.eclipse.elk.js
+
+jobs:
+  native:
+    name: native ${{ matrix.triple }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - triple: linux-x64-gnu
+            target: x86_64-unknown-linux-gnu
+            # The oldest hosted image: its glibc is the minimum the addon needs.
+            os: ubuntu-22.04
+            smoke: native
+          - triple: linux-arm64-gnu
+            target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04-arm
+            smoke: native
+          - triple: linux-x64-musl
+            target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            smoke: alpine
+          - triple: darwin-arm64
+            target: aarch64-apple-darwin
+            os: macos-latest
+            smoke: native
+          - triple: darwin-x64
+            target: x86_64-apple-darwin
+            # Cross-compiled on Apple Silicon; there is no x64 runtime to smoke test.
+            os: macos-latest
+            smoke: none
+          - triple: win32-x64-msvc
+            target: x86_64-pc-windows-msvc
+            os: windows-latest
+            smoke: native
+    runs-on: ${{ matrix.os }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '11.0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Install musl toolchain
+        if: matrix.triple == 'linux-x64-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          {
+            echo "CC_x86_64_unknown_linux_musl=musl-gcc"
+            echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc"
+            # A Node addon is a shared library loaded into a dynamically linked node.
+            echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS=-C target-feature=-crt-static"
+          } >> "$GITHUB_ENV"
+      - name: Build native addon
+        working-directory: ${{ env.PACKAGE_DIR }}
+        env:
+          ELK_RS_SKIP_WASM: '1'
+          NAPI_TARGET: ${{ matrix.target }}
+        run: bash build.sh
+      - name: Stage platform package
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: bun scripts/stage-platform-package.ts ${{ matrix.triple }}
+      - name: Smoke test
+        if: matrix.smoke == 'native'
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: bun scripts/smoke-native.cjs dist/npm/${{ matrix.triple }}
+      - name: Smoke test on Alpine
+        if: matrix.smoke == 'alpine'
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: >-
+          docker run --rm -v "$PWD:/pkg" -w /pkg node:22-alpine
+          node scripts/smoke-native.cjs dist/npm/${{ matrix.triple }}
+      - name: Archive staged package
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: |
+          mkdir -p artifact
+          tar -czf artifact/npm-platform-${{ matrix.triple }}.tgz -C dist/npm ${{ matrix.triple }}
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-platform-${{ matrix.triple }}
+          path: ${{ env.PACKAGE_DIR }}/artifact/npm-platform-${{ matrix.triple }}.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab # v2.87.13
+        with:
+          tool: wasm-pack
+      - name: Build WASM
+        working-directory: ${{ env.PACKAGE_DIR }}
+        env:
+          ELK_RS_SKIP_NATIVE: '1'
+        run: bash build.sh
+      - name: Archive WASM build
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: |
+          mkdir -p artifact
+          tar -czf artifact/npm-wasm.tgz -C dist wasm
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-wasm
+          path: ${{ env.PACKAGE_DIR }}/artifact/npm-wasm.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  verify:
+    needs: [native, wasm]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Check the tag names the package version
+        if: github.event_name == 'push'
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not name package version ${version}." >&2
+            exit 1
+          fi
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: npm-*
+          path: artifacts
+          merge-multiple: true
+      - name: Unpack builds
+        run: |
+          mkdir -p "$PACKAGE_DIR/dist/npm"
+          for archive in artifacts/npm-platform-*.tgz; do
+            tar -xzf "$archive" -C "$PACKAGE_DIR/dist/npm"
+          done
+          tar -xzf artifacts/npm-wasm.tgz -C "$PACKAGE_DIR/dist"
+          # The test suite exercises this host's native addon as a local build.
+          cp "$PACKAGE_DIR/dist/npm/linux-x64-gnu/elk-rs.linux-x64-gnu.node" "$PACKAGE_DIR/dist/"
+      - name: Test
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: |
+          bun install --frozen-lockfile
+          bun run test
+      - name: Stage root package
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: bun scripts/stage-root-package.ts
+      - name: Pack every package (dry run)
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: bun scripts/publish-npm.ts --dry-run
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-staged
+          path: ${{ env.PACKAGE_DIR }}/dist/npm
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: verify
+    if: github.event_name == 'push' || inputs.dry_run == false
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Use an npm CLI with trusted publishing
+        run: npm install -g npm@^11.5.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-staged
+          path: ${{ env.PACKAGE_DIR }}/dist/npm
+      - name: Publish platform packages, then @archboard/elk-rs
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: bun scripts/publish-npm.ts
