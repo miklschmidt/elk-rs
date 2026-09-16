@@ -2303,10 +2303,17 @@ fn json_id_value(id: &JsonId) -> Value {
     }
 }
 
+/// Convert a layout coordinate to a JSON number without changing its value.
+///
+/// An integral value is written as an integer (`354`, as JavaScript's
+/// `JSON.stringify` writes it, not `354.0`). Every other value is written as
+/// the shortest decimal that parses back to the same `f64`, so a caller reads
+/// exactly the double the layout computed: a value one ulp away from an
+/// integer, such as `354.00000000000006`, must not be snapped to `354`.
 fn f64_to_number(value: f64) -> serde_json::Number {
     if value.is_finite() {
         let rounded = value.round();
-        if (value - rounded).abs() <= 1e-6 {
+        if value == rounded {
             if rounded >= 0.0 && rounded <= u64::MAX as f64 {
                 return serde_json::Number::from(rounded as u64);
             }

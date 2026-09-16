@@ -13,6 +13,35 @@ use org_eclipse_elk_graph_json::org::eclipse::elk::graph::json::ElkGraphJson;
 use super::common::*;
 
 #[test]
+fn transfer_layout_writes_coordinates_exactly() {
+    // The fixed layout keeps these positions, so the output must carry the
+    // same doubles: one ulp above 354 is not 354, and 12 stays an integer.
+    let graph = r#"
+    {
+      "id": "root",
+      "layoutOptions": { "elk.algorithm": "org.eclipse.elk.fixed" },
+      "children": [
+        {"id": "a", "x": 354.00000000000006, "y": 12, "width": 10, "height": 10},
+        {"id": "b", "x": 22.999999999999943, "y": 0.5, "width": 10, "height": 10}
+      ]
+    }
+    "#;
+
+    let output =
+        org_eclipse_elk_graph_json::org::eclipse::elk::graph::json::layout_api::layout_json(
+            graph, "{}",
+        )
+        .expect("layout");
+    let value: serde_json::Value = serde_json::from_str(&output).expect("output JSON");
+    let children = value["children"].as_array().expect("children");
+
+    assert_eq!(children[0]["x"].as_f64(), Some(354.00000000000006));
+    assert_eq!(children[1]["x"].as_f64(), Some(22.999999999999943));
+    assert_eq!(children[1]["y"].as_f64(), Some(0.5));
+    assert!(children[0]["y"].is_u64(), "an integral coordinate is written as an integer");
+}
+
+#[test]
 fn transfer_layout_ok() {
     let graph = r#"
     {
