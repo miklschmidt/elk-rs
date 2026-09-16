@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -e
 
+# Environment knobs:
+#   NAPI_TARGET=<rust target>  build the native addon for another target
+#   ELK_RS_SKIP_WASM=1         build only the native addon
+#   ELK_RS_SKIP_NATIVE=1       build only the WASM package
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WASM_DIR="$SCRIPT_DIR/../org.eclipse.elk.wasm"
 NAPI_DIR="$SCRIPT_DIR/../org.eclipse.elk.napi"
@@ -23,7 +28,9 @@ fi
 
 # 1. WASM build
 echo "--- Building WASM ---"
-if command -v wasm-pack &> /dev/null; then
+if [ -n "$ELK_RS_SKIP_WASM" ]; then
+  echo "Skipped (ELK_RS_SKIP_WASM)."
+elif command -v wasm-pack &> /dev/null; then
   # Web target: ES module glue for browsers and bundlers.
   (cd "$WASM_DIR" && wasm-pack build --target web --out-dir "$DIST_DIR/wasm" --release)
   # wasm-pack generates .gitignore (containing "*") and package.json in the output dir.
@@ -46,9 +53,11 @@ else
   echo "Install with: cargo install wasm-pack"
 fi
 
-# 2. Native addon build (NAPI_TARGET, e.g. x86_64-unknown-linux-musl, cross-compiles)
+# 2. Native addon build (stripped of symbols)
 echo "--- Building native addon ---"
-if [ -n "$PKG_RUNNER" ] && [ -f "$NAPI_DIR/Cargo.toml" ]; then
+if [ -n "$ELK_RS_SKIP_NATIVE" ]; then
+  echo "Skipped (ELK_RS_SKIP_NATIVE)."
+elif [ -n "$PKG_RUNNER" ] && [ -f "$NAPI_DIR/Cargo.toml" ]; then
   if [ -n "$NAPI_TARGET" ]; then
     (cd "$NAPI_DIR" && CARGO_PROFILE_RELEASE_STRIP=symbols $PKG_RUNNER @napi-rs/cli build --release --platform --target "$NAPI_TARGET" --output-dir "$DIST_DIR")
   else

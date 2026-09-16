@@ -10,7 +10,7 @@
 // `bun publish --dry-run`, needs no credentials, and with --allow-missing
 // checks whatever is staged.
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { ROOT_STAGE_DIR, platformPackageSpecs, platformStageDir } from "./npm-packages";
@@ -29,6 +29,12 @@ const args = dryRun ? ["publish", "--dry-run"] : ["publish", "--access", "public
 const env = dryRun ? { ...process.env, NPM_CONFIG_TOKEN: process.env.NPM_CONFIG_TOKEN ?? "dry-run-token" } : process.env;
 
 for (const dir of packageDirs.filter((candidate) => !missing.includes(candidate))) {
+	const { name, version } = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+	if (!dryRun && isPublished(name, version)) {
+		// A rerun after a partly failed release continues where it stopped.
+		console.log(`\n=== ${name}@${version} is already published; skipping`);
+		continue;
+	}
 	console.log(`\n=== ${command} ${args.join(" ")} in ${dir}`);
 	const result = spawnSync(command, args, { cwd: dir, env, stdio: "inherit" });
 	if (result.error) throw result.error;
@@ -36,4 +42,9 @@ for (const dir of packageDirs.filter((candidate) => !missing.includes(candidate)
 	if (result.status !== 0) {
 		throw new Error(`${command} ${args.join(" ")} failed in ${dir}`);
 	}
+}
+
+function isPublished(name: string, version: string): boolean {
+	const result = spawnSync("npm", ["view", `${name}@${version}`, "version"], { encoding: "utf8" });
+	return result.status === 0 && result.stdout.trim() === version;
 }
