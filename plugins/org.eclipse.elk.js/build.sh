@@ -17,13 +17,13 @@ echo "=== elk-rs build ==="
 rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR/wasm"
 
-# Node package runner: npx where npm is installed, bunx otherwise.
+# The napi-rs CLI, through npx where npm is installed and bunx otherwise.
 if command -v npx &> /dev/null; then
-  PKG_RUNNER=npx
+  NAPI_CLI="npx --yes -p @napi-rs/cli@3.10.3 napi"
 elif command -v bunx &> /dev/null; then
-  PKG_RUNNER=bunx
+  NAPI_CLI="bunx @napi-rs/cli@3.10.3"
 else
-  PKG_RUNNER=""
+  NAPI_CLI=""
 fi
 
 # 1. WASM build
@@ -57,11 +57,11 @@ fi
 echo "--- Building native addon ---"
 if [ -n "$ELK_RS_SKIP_NATIVE" ]; then
   echo "Skipped (ELK_RS_SKIP_NATIVE)."
-elif [ -n "$PKG_RUNNER" ] && [ -f "$NAPI_DIR/Cargo.toml" ]; then
+elif [ -n "$NAPI_CLI" ] && [ -f "$NAPI_DIR/Cargo.toml" ]; then
   if [ -n "$NAPI_TARGET" ]; then
-    (cd "$NAPI_DIR" && CARGO_PROFILE_RELEASE_STRIP=symbols $PKG_RUNNER @napi-rs/cli build --release --platform --target "$NAPI_TARGET" --output-dir "$DIST_DIR")
+    (cd "$NAPI_DIR" && CARGO_PROFILE_RELEASE_STRIP=symbols $NAPI_CLI build --release --platform --target "$NAPI_TARGET" --output-dir "$DIST_DIR")
   else
-    (cd "$NAPI_DIR" && CARGO_PROFILE_RELEASE_STRIP=symbols $PKG_RUNNER @napi-rs/cli build --release --platform --output-dir "$DIST_DIR")
+    (cd "$NAPI_DIR" && CARGO_PROFILE_RELEASE_STRIP=symbols $NAPI_CLI build --release --platform --output-dir "$DIST_DIR")
   fi
   # napi-rs also writes JS/TS bindings; this package ships its own.
   rm -f "$DIST_DIR/index.d.ts" "$DIST_DIR/index.js"
