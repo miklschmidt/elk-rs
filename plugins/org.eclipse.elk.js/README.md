@@ -1,19 +1,48 @@
-# elk-rs
+# @archboard/elk-rs
 
 ELK layout engine rewritten in Rust — drop-in replacement for [elkjs](https://github.com/kieler/elkjs) with WASM and native Node.js addon support.
+
+> **This is a fork** of [openedges/elk-rs](https://github.com/openedges/elk-rs)
+> ([source](https://github.com/miklschmidt/elk-rs/tree/archboard)), published
+> under the `@archboard` scope. Besides its npm packaging it fixes three
+> problems in the JS package:
+>
+> 1. The WASM fallback works on Node.js and Bun when no native addon is
+>    installed (upstream loaded the web-target WASM without initialising it).
+> 2. `js/elk-worker.js` no longer mistakes Bun's main thread for a Web Worker.
+> 3. A layout error rejects with ELK's message and prints no Rust panic to
+>    stderr; on WASM the message is reported instead of an `unreachable` trap,
+>    and the next layout starts from a fresh instance.
 
 ## Installation
 
 ```bash
-npm install elk-rs
+npm install @archboard/elk-rs
+# or
+bun add @archboard/elk-rs
 ```
+
+On supported platforms a native addon is installed through an optional
+dependency; everywhere else the package falls back to WASM.
+
+| Platform | Package |
+|---|---|
+| macOS ARM64 (Apple Silicon) | `@archboard/elk-rs-darwin-arm64` |
+| macOS x64 (Intel) | `@archboard/elk-rs-darwin-x64` |
+| Linux x64 (glibc) | `@archboard/elk-rs-linux-x64-gnu` |
+| Linux x64 (musl) | `@archboard/elk-rs-linux-x64-musl` |
+| Linux ARM64 (glibc) | `@archboard/elk-rs-linux-arm64-gnu` |
+| Windows x64 | `@archboard/elk-rs-win32-x64-msvc` |
+
+The native addon's `layout()` runs synchronously on the calling thread (the
+returned promise is already settled); run it in a Worker to keep a thread free.
 
 ## Usage
 
-elk-rs provides an elkjs-compatible API. In most cases you can replace `elkjs` with `elk-rs` directly:
+elk-rs provides an elkjs-compatible API. In most cases you can replace `elkjs` with `@archboard/elk-rs` directly:
 
 ```js
-const ELK = require('elk-rs');
+const ELK = require('@archboard/elk-rs');
 const elk = new ELK();
 
 const graph = {
@@ -34,7 +63,7 @@ elk.layout(graph).then(console.log);
 ### ESM
 
 ```js
-import ELK from 'elk-rs';
+import ELK from '@archboard/elk-rs';
 const elk = new ELK();
 ```
 
@@ -45,11 +74,20 @@ elk-rs works in the browser via WASM. Bundlers that respect the `"browser"` fiel
 ### Web Worker
 
 ```js
-const ELK = require('elk-rs');
+const ELK = require('@archboard/elk-rs');
 const elk = new ELK({
-  workerUrl: './node_modules/elk-rs/js/elk-worker.js'
+  workerUrl: './node_modules/@archboard/elk-rs/js/elk-worker.js'
 });
 ```
+
+In Bun, as with elkjs:
+
+```js
+import ELK from '@archboard/elk-rs/js/elk-api.js';
+const worker = new Worker(import.meta.resolve('@archboard/elk-rs/js/elk-worker.js'));
+const elk = new ELK({ workerFactory: () => worker });
+```
+
 
 ## API
 
@@ -84,7 +122,7 @@ Terminates the Web Worker (if one was created).
 
 - **Written in Rust** — compiled to WASM instead of GWT-transpiled JavaScript
 - **No GWT overhead** — faster startup, smaller memory footprint
-- **Native Node.js addon** — optional NAPI binding for maximum performance (future release)
+- **Native Node.js addon** — optional NAPI binding for maximum performance
 - **Same API** — elkjs-compatible `layout()`, `knownLayoutAlgorithms()`, etc.
 - **Same algorithms** — layered, stress, mrtree, radial, force, disco, rectpacking, sporeOverlap, sporeCompaction
 

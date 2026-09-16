@@ -2,27 +2,39 @@
 
 Pure Rust port of [Eclipse Layout Kernel (ELK)](https://www.eclipse.org/elk/), keeping Java-side feature/API/test parity while operating as a Rust workspace.
 
+> **This is a fork** of [openedges/elk-rs](https://github.com/openedges/elk-rs),
+> published to npm as `@archboard/elk-rs`. The `archboard` branch differs from
+> upstream in its npm packaging and release workflow
+> (`.github/workflows/publish-npm.yml`) and in three fixes to the JS package:
+>
+> 1. The WASM fallback works on Node.js and Bun when no native addon is
+>    installed (upstream loaded the web-target WASM without initialising it).
+> 2. `js/elk-worker.js` no longer mistakes Bun's main thread for a Web Worker.
+> 3. A layout error rejects with ELK's message and prints no Rust panic to
+>    stderr; on WASM the message is reported instead of an `unreachable` trap,
+>    and the next layout starts from a fresh instance.
+
 ## npm Package
 
 elk-rs is available as a drop-in replacement for [elkjs](https://github.com/kieler/elkjs):
 
 ```bash
-npm install elk-rs
+npm install @archboard/elk-rs
 ```
 
 On supported platforms, a native NAPI addon is automatically installed for best performance. Falls back to WASM on other platforms.
 
 | Platform | Package |
 |---|---|
-| macOS ARM64 (Apple Silicon) | `@elk-rs/darwin-arm64` |
-| macOS x64 (Intel) | `@elk-rs/darwin-x64` |
-| Linux x64 (glibc) | `@elk-rs/linux-x64-gnu` |
-| Linux x64 (musl/Alpine) | `@elk-rs/linux-x64-musl` |
-| Linux ARM64 | `@elk-rs/linux-arm64-gnu` |
-| Windows x64 | `@elk-rs/win32-x64-msvc` |
+| macOS ARM64 (Apple Silicon) | `@archboard/elk-rs-darwin-arm64` |
+| macOS x64 (Intel) | `@archboard/elk-rs-darwin-x64` |
+| Linux x64 (glibc) | `@archboard/elk-rs-linux-x64-gnu` |
+| Linux x64 (musl/Alpine) | `@archboard/elk-rs-linux-x64-musl` |
+| Linux ARM64 (glibc) | `@archboard/elk-rs-linux-arm64-gnu` |
+| Windows x64 | `@archboard/elk-rs-win32-x64-msvc` |
 
 ```js
-const ELK = require('elk-rs');
+const ELK = require('@archboard/elk-rs');
 const elk = new ELK();
 
 elk.layout({
@@ -70,7 +82,7 @@ cargo build --workspace
 
 ```sh
 cd plugins/org.eclipse.elk.js
-sh build.sh
+bash build.sh   # needs wasm-pack and npx or bunx
 npm install
 npm test
 ```
