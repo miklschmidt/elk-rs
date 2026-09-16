@@ -4,10 +4,10 @@
 //! and napi-rs wrappers.
 
 use std::any::Any;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::panic::{self, AssertUnwindSafe};
 use std::rc::Rc;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Once, OnceLock};
 
 use serde_json::{json, Map, Value};
 
@@ -121,6 +121,76 @@ fn panic_payload_to_string(payload: &(dyn Any + Send)) -> String {
     "unknown panic payload".to_string()
 }
 
+thread_local! {
+    /// Whether this thread is inside `layout_json`, where a panic is a layout error.
+    static IN_LAYOUT: Cell<bool> = const { Cell::new(false) };
+    /// The error message of the last panic raised inside `layout_json` on this thread.
+    static LAST_LAYOUT_PANIC: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Install, once per process, a panic hook that keeps layout panics quiet.
+///
+/// A panic inside `layout_json` is a layout error that is returned to the
+/// caller, so it must not also be printed to stderr. The hook records its
+/// message instead (on targets where panics abort, such as
+/// `wasm32-unknown-unknown`, that record is the only way the message reaches
+/// the caller; see [`take_last_layout_panic`]). Panics anywhere else are
+/// handed to the previously installed hook unchanged.
+fn install_quiet_layout_panic_hook() {
+    static INSTALL: Once = Once::new();
+    INSTALL.call_once(|| {
+        let previous = panic::take_hook();
+        panic::set_hook(Box::new(move |info| {
+            if IN_LAYOUT.with(Cell::get) {
+                let message = layout_error_message(panic_payload_to_string(info.payload()));
+                LAST_LAYOUT_PANIC.with(|slot| *slot.borrow_mut() = Some(message));
+            } else {
+                previous(info);
+            }
+        }));
+    });
+}
+
+/// Marks this thread as inside a layout call until dropped, even when unwinding.
+struct InLayoutGuard;
+
+impl InLayoutGuard {
+    fn enter() -> Self {
+        IN_LAYOUT.with(|flag| flag.set(true));
+        LAST_LAYOUT_PANIC.with(|slot| slot.borrow_mut().take());
+        InLayoutGuard
+    }
+}
+
+impl Drop for InLayoutGuard {
+    fn drop(&mut self) {
+        IN_LAYOUT.with(|flag| flag.set(false));
+    }
+}
+
+/// Word a panic raised during layout the way Java ELK reports the failure.
+fn layout_error_message(msg: String) -> String {
+    // If the panic message already contains an ELK exception class name,
+    // pass it through; otherwise wrap with UnsupportedConfigurationException
+    // (matching Java ELK's RecursiveGraphLayoutEngine behavior).
+    if msg.contains("org.eclipse.elk.core.") {
+        msg
+    } else {
+        format!("org.eclipse.elk.core.UnsupportedConfigurationException: {msg}")
+    }
+}
+
+/// Take the error message of the last panic raised inside `layout_json` on
+/// this thread, if any.
+///
+/// Where panics unwind, `layout_json` already returns that message as its
+/// error. Where they abort (WASM), the call traps instead and never returns,
+/// so the binding reads the message here to report it.
+pub fn take_last_layout_panic() -> Option<String> {
+    IN_LAYOUT.with(|flag| flag.set(false));
+    LAST_LAYOUT_PANIC.with(|slot| slot.borrow_mut().take())
+}
+
 /// Merge global layout options into every element of the graph JSON as defaults.
 ///
 /// Global options are applied recursively to the root and all descendant
@@ -214,6 +284,8 @@ fn apply_global_options_recursive(element: &mut Value, global_opts: &Map<String,
 /// Returns the laid-out graph JSON string, or an error message.
 pub fn layout_json(graph_json: &str, options_json: &str) -> Result<String, String> {
     ensure_initialized();
+    install_quiet_layout_panic_hook();
+    let _in_layout = InLayoutGuard::enter();
 
     let result = panic::catch_unwind(AssertUnwindSafe(|| -> Result<String, String> {
         let mut input_value: Value = serde_json::from_str(graph_json)
@@ -249,19 +321,10 @@ pub fn layout_json(graph_json: &str, options_json: &str) -> Result<String, Strin
     }));
 
     match result {
-            Ok(inner) => inner,
+        Ok(inner) => inner,
         Err(payload) => {
-            let msg = panic_payload_to_string(&*payload);
-            // If the panic message already contains an ELK exception class name,
-            // pass it through; otherwise wrap with UnsupportedConfigurationException
-            // (matching Java ELK's RecursiveGraphLayoutEngine behavior).
-            if msg.contains("org.eclipse.elk.core.") {
-                Err(msg)
-            } else {
-                Err(format!(
-                    "org.eclipse.elk.core.UnsupportedConfigurationException: {msg}"
-                ))
-            }
+            LAST_LAYOUT_PANIC.with(|slot| slot.borrow_mut().take());
+            Err(layout_error_message(panic_payload_to_string(&*payload)))
         }
     }
 }
