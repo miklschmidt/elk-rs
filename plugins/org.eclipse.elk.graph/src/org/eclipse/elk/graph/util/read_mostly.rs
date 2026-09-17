@@ -17,6 +17,44 @@ thread_local! {
         const { RefCell::new(Vec::new()) };
 }
 
+/// Run `read` on this thread's copy of value `id`, refreshing it from `current` when its
+/// generation is stale. Not generic, so each `ReadMostly::read` instantiation stays small.
+fn with_snapshot(
+    id: usize,
+    generation: &AtomicUsize,
+    current: &dyn Fn() -> (usize, Arc<dyn Any + Send + Sync>),
+    read: &mut dyn FnMut(&(dyn Any + Send + Sync)),
+) {
+    let generation = generation.load(Ordering::Acquire);
+    SNAPSHOTS.with(|snapshots| {
+        {
+            let snapshots = snapshots.borrow();
+            if let Some((_, seen, value)) = snapshots.iter().find(|(seen_id, _, _)| *seen_id == id)
+            {
+                if *seen == generation {
+                    // Read through this thread's own `Arc` without cloning it: a clone would
+                    // write the reference count that every thread's copy shares.
+                    read(value.as_ref());
+                    return;
+                }
+            }
+        }
+        let (generation, value) = current();
+        match snapshots.try_borrow_mut() {
+            Ok(mut copies) => {
+                copies.retain(|(seen_id, _, _)| *seen_id != id);
+                copies.push((id, generation, value));
+                drop(copies);
+                let copies = snapshots.borrow();
+                let (_, _, value) = copies.last().expect("the copy just stored");
+                read(value.as_ref());
+            }
+            // Nested in a read that holds this thread's copies: read the value directly.
+            Err(_) => read(value.as_ref()),
+        }
+    });
+}
+
 /// A value shared by every thread, replaced as a whole by writers and read without locking.
 ///
 /// Layouts running on several threads at once read registries (option metadata, clone
@@ -41,50 +79,44 @@ impl<T: Clone + Send + Sync + 'static> ReadMostly<T> {
     }
 
     /// Run `read` on the current value.
+    ///
+    /// Without threads (WASM without atomics) nothing can contend, and cloning the `Arc` under
+    /// the uncontended lock is cheaper than the per-thread copies.
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
+    #[inline]
     pub fn read<R>(&self, read: impl FnOnce(&T) -> R) -> R {
-        let generation = self.generation.load(Ordering::Acquire);
-        SNAPSHOTS.with(|snapshots| {
-            let current = snapshots
-                .borrow()
-                .iter()
-                .any(|(id, seen, _)| *id == self.id && *seen == generation);
-            if !current {
-                if let Some(value) = self.refresh(snapshots) {
-                    // Nested in a read that holds this thread's copies: read the value directly.
-                    let value = value.downcast_ref::<T>().expect("snapshot holds the value's type");
-                    return read(value);
-                }
-            }
-            // Read through this thread's own `Arc` without cloning it: a clone would write the
-            // reference count that every thread's copy shares.
-            let snapshots = snapshots.borrow();
-            let (_, _, value) = snapshots
-                .iter()
-                .find(|(id, _, _)| *id == self.id)
-                .expect("this thread's copy");
-            read(value.downcast_ref::<T>().expect("snapshot holds the value's type"))
-        })
+        let current = self.current.lock().clone();
+        read(&current)
     }
 
-    /// Replace this thread's copy with the current value. Returns the value instead when the
-    /// copies are borrowed by an enclosing read on this thread.
-    fn refresh(
-        &self,
-        snapshots: &RefCell<Vec<Snapshot>>,
-    ) -> Option<Arc<dyn Any + Send + Sync>> {
-        let (generation, value) = {
+    /// Run `read` on the current value.
+    #[cfg(not(all(target_arch = "wasm32", not(target_feature = "atomics"))))]
+    #[inline]
+    pub fn read<R>(&self, read: impl FnOnce(&T) -> R) -> R {
+        let mut read = Some(read);
+        let mut result = None;
+        with_snapshot(
+            self.id,
+            &self.generation,
+            &self.current_any(),
+            &mut |value| {
+                let value = value
+                    .downcast_ref::<T>()
+                    .expect("snapshot holds the value's type");
+                let read = read.take().expect("read runs once");
+                result = Some(read(value));
+            },
+        );
+        result.expect("read ran")
+    }
+
+    /// The current value, for a thread whose copy is stale.
+    fn current_any(&self) -> impl Fn() -> (usize, Arc<dyn Any + Send + Sync>) + '_ {
+        move || {
             let current = self.current.lock();
             // The generation is read under the lock, so it belongs to this value.
             let value: Arc<dyn Any + Send + Sync> = current.clone();
             (self.generation.load(Ordering::Acquire), value)
-        };
-        match snapshots.try_borrow_mut() {
-            Ok(mut snapshots) => {
-                snapshots.retain(|(id, _, _)| *id != self.id);
-                snapshots.push((self.id, generation, value));
-                None
-            }
-            Err(_) => Some(value),
         }
     }
 

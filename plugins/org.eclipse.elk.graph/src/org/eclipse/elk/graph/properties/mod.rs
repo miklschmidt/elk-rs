@@ -215,12 +215,7 @@ impl<T: Clone + Send + Sync + 'static> Property<T> {
 
     pub fn get_default(&self) -> Option<T> {
         let value = self.default_value.as_ref()?;
-        if !ElkReflect::has_clone::<T>() {
-            panic!(
-                "Couldn't clone property '{}'. Make sure its type is registered with ElkReflect.",
-                self.id
-            );
-        }
+        // One registry read: an unregistered type clones to None as well.
         ElkReflect::clone_value(value).or_else(|| {
             panic!(
                 "Couldn't clone property '{}'. Make sure its type is registered with ElkReflect.",

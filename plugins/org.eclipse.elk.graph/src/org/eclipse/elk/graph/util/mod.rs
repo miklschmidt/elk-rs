@@ -69,36 +69,43 @@ impl ElkReflect {
     }
 
     pub fn new_instance<T: Send + Sync + 'static>() -> Option<T> {
-        registry()
-            .read(|registry| registry.new_instance.get(&TypeId::of::<T>()).map(|ctor| ctor()))
+        new_instance_of(TypeId::of::<T>())
             .and_then(|boxed| boxed.downcast::<T>().ok())
             .map(|boxed| *boxed)
     }
 
     pub fn clone_value<T: Send + Sync + 'static>(value: &T) -> Option<T> {
-        registry()
-            .read(|registry| {
-                registry
-                    .clone
-                    .get(&TypeId::of::<T>())
-                    .and_then(|clone_fn| clone_fn(value as &dyn Any))
-            })
+        Self::clone_any(value as &dyn Any)
             .and_then(|boxed| boxed.downcast::<T>().ok())
             .map(|boxed| *boxed)
     }
 
     pub fn clone_any(value: &dyn Any) -> Option<Box<dyn Any + Send + Sync>> {
-        registry().read(|registry| {
-            registry
-                .clone
-                .get(&value.type_id())
-                .and_then(|clone_fn| clone_fn(value))
-        })
+        clone_of(value)
     }
 
     pub fn has_clone<T: Send + Sync + 'static>() -> bool {
-        registry().read(|registry| registry.clone.contains_key(&TypeId::of::<T>()))
+        has_clone_of(TypeId::of::<T>())
     }
+}
+
+// Not generic: the typed functions above are instantiated for every property type.
+
+fn new_instance_of(type_id: TypeId) -> Option<Box<dyn Any + Send + Sync>> {
+    registry().read(|registry| registry.new_instance.get(&type_id).map(|ctor| ctor()))
+}
+
+fn clone_of(value: &dyn Any) -> Option<Box<dyn Any + Send + Sync>> {
+    registry().read(|registry| {
+        registry
+            .clone
+            .get(&value.type_id())
+            .and_then(|clone_fn| clone_fn(value))
+    })
+}
+
+fn has_clone_of(type_id: TypeId) -> bool {
+    registry().read(|registry| registry.clone.contains_key(&type_id))
 }
 
 pub struct ElkGraphUtil;
