@@ -1,6 +1,6 @@
 {
   "name": "@archboard/elk-rs",
-  "version": "0.11.1",
+  "version": "0.11.2",
   "description": "ELK layout engine in Rust — elkjs-compatible API with WASM and native Node.js addon (fork of openedges/elk-rs)",
   "license": "EPL-2.0",
   "main": "js/index.js",
@@ -75,12 +75,12 @@
     "vitest": "^3.0.0"
   },
   "optionalDependencies": {
-    "@archboard/elk-rs-darwin-arm64": "0.11.1",
-    "@archboard/elk-rs-darwin-x64": "0.11.1",
-    "@archboard/elk-rs-linux-x64-gnu": "0.11.1",
-    "@archboard/elk-rs-linux-x64-musl": "0.11.1",
-    "@archboard/elk-rs-linux-arm64-gnu": "0.11.1",
-    "@archboard/elk-rs-win32-x64-msvc": "0.11.1"
+    "@archboard/elk-rs-darwin-arm64": "0.11.2",
+    "@archboard/elk-rs-darwin-x64": "0.11.2",
+    "@archboard/elk-rs-linux-x64-gnu": "0.11.2",
+    "@archboard/elk-rs-linux-x64-musl": "0.11.2",
+    "@archboard/elk-rs-linux-arm64-gnu": "0.11.2",
+    "@archboard/elk-rs-win32-x64-msvc": "0.11.2"
   },
   "keywords": [
     "elk",
