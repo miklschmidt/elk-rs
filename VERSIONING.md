@@ -12,6 +12,21 @@ elk-rs is a Rust port of Java ELK (Eclipse Layout Kernel) and also provides an e
 
 This policy keeps versions aligned across all three projects while managing porting, verification, and releases systematically.
 
+## Releasing `@archboard/elk-rs` (the `archboard` branch)
+
+The fork publishes `@archboard/elk-rs` and its six `@archboard/elk-rs-<triple>` packages from
+`.github/workflows/publish-npm.yml`, with its own patch versions (`0.11.1`, `0.11.2`, ...):
+
+1. Commit and push the branch; let CI pass.
+2. Bump the version in `plugins/org.eclipse.elk.js/package.json` (and its pinned
+   `optionalDependencies`) and `plugins/org.eclipse.elk.napi/package.json`, run `bun install` in
+   `plugins/org.eclipse.elk.js`, commit and push.
+3. Tag that commit and push the tag: `git tag -a v0.11.2 -m "@archboard/elk-rs 0.11.2"`,
+   `git push origin v0.11.2`.
+4. Watch the tag's run. It builds and tests every package and publishes only after all of that
+   passed, so no separate dry run precedes the tag. `workflow_dispatch` with `dry_run` is for
+   checking a packaging change on a branch.
+
 ---
 
 ## 1. Version Management

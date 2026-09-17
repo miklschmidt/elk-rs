@@ -4,10 +4,16 @@ name: Publish npm
 # stages @archboard/elk-rs and its @archboard/elk-rs-<triple> packages, tests
 # them, and publishes them through npm trusted publishing (no token).
 #
-# - workflow_dispatch with dry_run (default true): build, test, stage and
-#   `bun publish --dry-run` every package; nothing is published.
-# - workflow_dispatch with dry_run false, or a pushed tag v<version>: the same,
-#   then publish from the `npm-publish` environment.
+# - A pushed tag v<version> releases: build, test and stage every package, then
+#   publish from the `npm-publish` environment. Publishing only starts once
+#   every build and the verify job have passed, so a release needs no dry run
+#   first. To release: push the branch, let CI pass, bump the version in the
+#   root and napi package.json (and the pinned optionalDependencies), push
+#   that commit, then push an annotated tag v<version> on it and watch this
+#   run.
+# - workflow_dispatch with dry_run (default true): the same without
+#   publishing, for checking a packaging change on a branch.
+# - workflow_dispatch with dry_run false: publish from a branch.
 
 on:
   push:
