@@ -177,3 +177,24 @@ fn every_nested_fixture_matches_elkjs() {
 fn every_routing_fixture_matches_elkjs() {
     assert_group_parity("routing");
 }
+
+/// Multi-edge wrapping of this graph puts a breaking point dummy next to a north/south port
+/// dummy, a pair Java defines no spacing for: Java fails with a NullPointerException and elkjs
+/// with a TypeError. elk-rs fails too, and says which spacing is missing.
+#[test]
+fn multi_edge_wrapping_without_a_spacing_fails_naming_the_node_types() {
+    let input = read_json(&fixture_dir().join("wrapping-failure.json"));
+    let solve_with = |strategy: &str| {
+        let mut graph = input["graph"].clone();
+        graph["layoutOptions"]["elk.layered.wrapping.strategy"] = Value::from(strategy);
+        layout_api::layout_json(
+            &serde_json::to_string(&graph).unwrap(),
+            &serde_json::to_string(&input["layoutOptions"]).unwrap(),
+        )
+    };
+
+    let error = solve_with("MULTI_EDGE").expect_err("multi-edge wrapping lays out");
+    assert!(error.contains("UnspecifiedSpacingException"), "{error}");
+    assert!(error.contains("NorthSouthPort") && error.contains("BreakingPoint"), "{error}");
+    assert!(solve_with("SINGLE_EDGE").is_ok());
+}

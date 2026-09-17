@@ -19,7 +19,9 @@ use org_eclipse_elk_alg_force::org::eclipse::elk::alg::force::options::stress_me
 use org_eclipse_elk_alg_force::org::eclipse::elk::alg::force::stress::stress_layout_provider::StressLayoutProvider;
 use org_eclipse_elk_alg_layered::org::eclipse::elk::alg::layered::elk_layered::ElkLayered;
 use org_eclipse_elk_alg_layered::org::eclipse::elk::alg::layered::layered_layout_provider::LayeredLayoutProvider;
-use org_eclipse_elk_alg_layered::org::eclipse::elk::alg::layered::options::LayeredMetaDataProvider;
+use org_eclipse_elk_alg_layered::org::eclipse::elk::alg::layered::options::{
+    LayeredMetaDataProvider, UnspecifiedSpacingException,
+};
 use org_eclipse_elk_alg_layered::org::eclipse::elk::alg::layered::plain_java_initialization::initialize_plain_java_layout;
 use org_eclipse_elk_alg_mrtree::org::eclipse::elk::alg::mrtree::options::mrtree_meta_data_provider::MrTreeMetaDataProvider;
 use org_eclipse_elk_alg_mrtree::org::eclipse::elk::alg::mrtree::tree_layout_provider::TreeLayoutProvider;
@@ -117,6 +119,9 @@ fn panic_payload_to_string(payload: &(dyn Any + Send)) -> String {
     }
     if let Some(message) = payload.downcast_ref::<String>() {
         return message.clone();
+    }
+    if let Some(exception) = payload.downcast_ref::<UnspecifiedSpacingException>() {
+        return format!("org.eclipse.elk.alg.layered.options.Spacings$UnspecifiedSpacingException: {exception}");
     }
     "unknown panic payload".to_string()
 }

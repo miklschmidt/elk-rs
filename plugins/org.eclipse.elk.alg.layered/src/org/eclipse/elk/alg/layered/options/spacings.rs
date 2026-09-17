@@ -211,7 +211,7 @@ impl Spacings {
         let t2 = n2
             .lock().node_type();
         let layout_option = mapping[t1.ordinal()][t2.ordinal()]
-            .unwrap_or_else(|| panic_any(UnspecifiedSpacingException::new(None)));
+            .unwrap_or_else(|| panic_any(UnspecifiedSpacingException::between(t1, t2)));
         let s1 = self.get_individual_or_default_f64(n1, layout_option);
         let s2 = self.get_individual_or_default_f64(n2, layout_option);
         s1.max(s2)
@@ -224,7 +224,7 @@ impl Spacings {
         mapping: &[Vec<Option<&'static Property<f64>>>],
     ) -> f64 {
         let layout_option = mapping[nt1.ordinal()][nt2.ordinal()]
-            .unwrap_or_else(|| panic_any(UnspecifiedSpacingException::new(None)));
+            .unwrap_or_else(|| panic_any(UnspecifiedSpacingException::between(nt1, nt2)));
         self.graph_spacing_value(layout_option)
     }
 
@@ -354,6 +354,16 @@ pub struct UnspecifiedSpacingException {
 impl UnspecifiedSpacingException {
     pub fn new(message: Option<String>) -> Self {
         UnspecifiedSpacingException { message }
+    }
+
+    /// No spacing is defined between nodes of these two types. Java fails the same layout with a
+    /// NullPointerException, elkjs with a TypeError.
+    pub fn between(t1: NodeType, t2: NodeType) -> Self {
+        UnspecifiedSpacingException {
+            message: Some(format!(
+                "No spacing is defined between {t1:?} and {t2:?} nodes"
+            )),
+        }
     }
 }
 
