@@ -4,15 +4,21 @@ ELK layout engine rewritten in Rust — drop-in replacement for [elkjs](https://
 
 > **This is a fork** of [openedges/elk-rs](https://github.com/openedges/elk-rs)
 > ([source](https://github.com/miklschmidt/elk-rs/tree/archboard)), published
-> under the `@archboard` scope. Besides its npm packaging it fixes three
+> under the `@archboard` scope. Besides its npm packaging it fixes these
 > problems in the JS package:
 >
 > 1. The WASM fallback works on Node.js and Bun when no native addon is
 >    installed (upstream loaded the web-target WASM without initialising it).
 > 2. `js/elk-worker.js` no longer mistakes Bun's main thread for a Web Worker.
-> 3. A layout error rejects with ELK's message and prints no Rust panic to
->    stderr; on WASM the message is reported instead of an `unreachable` trap,
->    and the next layout starts from a fresh instance.
+> 3. A layout error rejects with an `Error` carrying ELK's message and prints
+>    no Rust panic to stderr; on WASM the message is reported instead of an
+>    `unreachable` trap, and the next layout starts from a fresh instance.
+> 4. Every export has type declarations, and `@archboard/elk-rs/worker.browser`
+>    is a module Web Worker for bundled browser apps.
+>
+> and lays graphs out as the elkjs build archboard used does: interactive
+> layouts no longer deadlock and follow an edge's previous bend points, and
+> Java's `float` arithmetic is computed in `double`, as GWT compiles it.
 
 ## Installation
 
