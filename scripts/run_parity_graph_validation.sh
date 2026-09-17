@@ -8,7 +8,9 @@ WARMUP=${4:-1}
 MODE=${5:-both}
 OUTPUT=${6:-tests/results_graph_validation.csv}
 
-cargo run -p org-eclipse-elk-core --bin perf_graph_validation -- \
+# Timings are compared with Java and with recorded baselines, so they come from optimized builds.
+# shellcheck disable=SC2086
+cargo run ${PARITY_CARGO_FLAGS:---release} -p org-eclipse-elk-core --bin perf_graph_validation -- \
   --nodes "$NODES" \
   --edges "$EDGES" \
   --iterations "$ITERATIONS" \

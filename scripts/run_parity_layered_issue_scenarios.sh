@@ -6,7 +6,9 @@ ITERATIONS=${2:-20}
 WARMUP=${3:-3}
 OUTPUT=${4:-tests/results_layered_issue_scenarios.csv}
 
-cargo run -p org-eclipse-elk-alg-layered --bin perf_layered_issue_scenarios -- \
+# Timings are compared with Java and with recorded baselines, so they come from optimized builds.
+# shellcheck disable=SC2086
+cargo run ${PARITY_CARGO_FLAGS:---release} -p org-eclipse-elk-alg-layered --bin perf_layered_issue_scenarios -- \
   --scenarios "$SCENARIOS" \
   --iterations "$ITERATIONS" \
   --warmup "$WARMUP" \
