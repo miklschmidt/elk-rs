@@ -116,7 +116,7 @@ export interface ELK {
     layout<T extends ElkNode>(
         graph: T,
         args?: ElkLayoutArguments
-    ): Promise<Omit<T, 'children'> & { children?: (T['children'][number] & ElkNode)[] }>;
+    ): Promise<Omit<T, 'children'> & { children?: (NonNullable<T['children']>[number] & ElkNode)[] }>;
     knownLayoutAlgorithms(): Promise<ElkLayoutAlgorithmDescription[]>
     knownLayoutOptions(): Promise<ElkLayoutOptionDescription[]>
     knownLayoutCategories(): Promise<ElkLayoutCategoryDescription[]>

@@ -8,14 +8,28 @@
   "types": "typings/elk-api.d.ts",
   "exports": {
     ".": {
+      "types": "./typings/elk-api.d.ts",
       "browser": "./js/index.browser.js",
       "default": "./js/index.js"
     },
-    "./js/elk-api.js": "./js/elk-api.js",
-    "./js/elk-worker.js": "./js/elk-worker.js",
-    "./worker.browser": "./js/worker.browser.mjs",
-    "./wasm": "./dist/wasm/org_eclipse_elk_wasm.js",
+    "./js/elk-api.js": {
+      "types": "./typings/elk-api.d.ts",
+      "default": "./js/elk-api.js"
+    },
+    "./js/elk-worker.js": {
+      "types": "./typings/elk-worker.d.ts",
+      "default": "./js/elk-worker.js"
+    },
+    "./worker.browser": {
+      "types": "./typings/worker.browser.d.ts",
+      "default": "./js/worker.browser.mjs"
+    },
+    "./wasm": {
+      "types": "./dist/wasm/org_eclipse_elk_wasm.d.ts",
+      "default": "./dist/wasm/org_eclipse_elk_wasm.js"
+    },
     "./wasm/org_eclipse_elk_wasm_bg.wasm": "./dist/wasm/org_eclipse_elk_wasm_bg.wasm",
+    "./typings/*": "./typings/*",
     "./package.json": "./package.json"
   },
   "files": [
@@ -53,6 +67,7 @@
   },
   "devDependencies": {
     "elkjs": "^0.11.0",
+    "typescript": "^5.9.3",
     "vitest": "^3.0.0"
   },
   "optionalDependencies": {
