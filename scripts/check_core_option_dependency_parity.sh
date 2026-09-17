@@ -27,7 +27,8 @@ awk '
         gsub(/[[:space:]]+$/, "", text)
         return text
     }
-    /pub static [A-Z0-9_]+:[[:space:]]*LazyLock<Property/ {
+    # A declaration can break after "LazyLock<" (rustfmt does for long property types).
+    /pub static [A-Z0-9_]+:[[:space:]]*LazyLock<([[:space:]]*$|Property)/ {
         symbol = $0
         sub(/^.*pub static[[:space:]]+/, "", symbol)
         sub(/:.*/, "", symbol)
@@ -38,7 +39,7 @@ awk '
         property_id_by_symbol[current_property] = id
         current_property = ""
     }
-    /pub const [A-Z0-9_]+:[[:space:]]*.*LazyLock<Property/ {
+    /pub const [A-Z0-9_]+:[[:space:]]*.*LazyLock<([[:space:]]*$|Property)/ {
         alias = $0
         sub(/^.*pub const[[:space:]]+/, "", alias)
         sub(/:.*/, "", alias)
