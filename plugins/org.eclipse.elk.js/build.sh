@@ -37,6 +37,27 @@ elif command -v wasm-pack &> /dev/null; then
   # Remove them so npm pack can include the WASM files.
   rm -f "$DIST_DIR/wasm/.gitignore" "$DIST_DIR/wasm/package.json"
 
+  # A panic aborts on WASM and may leave the instance's memory inconsistent, but the web
+  # glue instantiates once per realm. js/worker.browser.mjs replaces a trapped instance.
+  if ! grep -q 'let wasmModule, wasm;' "$DIST_DIR/wasm/org_eclipse_elk_wasm.js"; then
+    echo "ERROR: the web WASM glue no longer declares 'let wasmModule, wasm;'." >&2
+    exit 1
+  fi
+  cat >> "$DIST_DIR/wasm/org_eclipse_elk_wasm.js" <<'GLUE'
+
+/** Replace the instance with a new one of the same module, after a call trapped. */
+export function reset_instance() {
+    const module = wasmModule;
+    wasm = undefined;
+    return initSync({ module });
+}
+GLUE
+  cat >> "$DIST_DIR/wasm/org_eclipse_elk_wasm.d.ts" <<'GLUE'
+
+/** Replace the instance with a new one of the same module, after a call trapped. */
+export function reset_instance(): InitOutput;
+GLUE
+
   # Node.js target: CommonJS glue that Node.js and Bun can require synchronously.
   # It loads the same .wasm binary, so only its glue is kept, next to the web glue.
   NODE_WASM_DIR="$(mktemp -d)"

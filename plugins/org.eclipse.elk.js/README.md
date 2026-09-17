@@ -88,6 +88,23 @@ const worker = new Worker(import.meta.resolve('@archboard/elk-rs/js/elk-worker.j
 const elk = new ELK({ workerFactory: () => worker });
 ```
 
+### Module Web Worker in a bundled browser app
+
+`@archboard/elk-rs/worker.browser` is an ES module worker with no Node.js
+dependencies: it instantiates the WASM build, whose binary it references with
+`new URL(..., import.meta.url)` so bundlers emit it as an asset, and answers
+elkjs's worker protocol. With Vite:
+
+```js
+import ELK from '@archboard/elk-rs/js/elk-api.js';
+import ElkWorker from '@archboard/elk-rs/worker.browser?worker';
+
+const elk = new ELK({ workerFactory: () => new ElkWorker() });
+```
+
+A layout that fails rejects with an `Error` carrying ELK's message, and the
+worker replaces its WASM instance before the next layout.
+
 
 ## API
 

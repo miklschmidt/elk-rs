@@ -13,6 +13,9 @@
     },
     "./js/elk-api.js": "./js/elk-api.js",
     "./js/elk-worker.js": "./js/elk-worker.js",
+    "./worker.browser": "./js/worker.browser.mjs",
+    "./wasm": "./dist/wasm/org_eclipse_elk_wasm.js",
+    "./wasm/org_eclipse_elk_wasm_bg.wasm": "./dist/wasm/org_eclipse_elk_wasm_bg.wasm",
     "./package.json": "./package.json"
   },
   "files": [
