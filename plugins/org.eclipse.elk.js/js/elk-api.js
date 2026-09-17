@@ -80,7 +80,7 @@ class ELK {
         const resultJson = this.backend.layout_json(graphJson, optionsJson);
         return Promise.resolve(JSON.parse(resultJson));
       } catch (err) {
-        return Promise.reject(err);
+        return Promise.reject(toError(err));
       }
     }
 
@@ -101,7 +101,7 @@ class ELK {
       try {
         return Promise.resolve(JSON.parse(this.backend.known_layout_algorithms()));
       } catch (err) {
-        return Promise.reject(err);
+        return Promise.reject(toError(err));
       }
     }
     return this.worker.postMessage({ cmd: 'algorithms' });
@@ -112,7 +112,7 @@ class ELK {
       try {
         return Promise.resolve(JSON.parse(this.backend.known_layout_options()));
       } catch (err) {
-        return Promise.reject(err);
+        return Promise.reject(toError(err));
       }
     }
     return this.worker.postMessage({ cmd: 'options' });
@@ -123,7 +123,7 @@ class ELK {
       try {
         return Promise.resolve(JSON.parse(this.backend.known_layout_categories()));
       } catch (err) {
-        return Promise.reject(err);
+        return Promise.reject(toError(err));
       }
     }
     return this.worker.postMessage({ cmd: 'categories' });
@@ -135,6 +135,21 @@ class ELK {
     }
   }
 
+}
+
+/**
+ * The error a layout rejects with: always an `Error`, so that `String(error)` and
+ * `error.message` both carry the message, as they do for elkjs. A worker can only
+ * send a plain `{ message }` object across the message channel.
+ */
+function toError(error) {
+  if (error instanceof Error) {
+    return error;
+  }
+  if (error !== null && typeof error === 'object' && typeof error.message === 'string') {
+    return new Error(error.message);
+  }
+  return new Error(String(error));
 }
 
 class PromisedWorker {
@@ -175,7 +190,7 @@ class PromisedWorker {
     if (resolver) {
       delete self.resolvers[json.id];
       if (json.error) {
-        resolver(json.error);
+        resolver(toError(json.error));
       } else {
         resolver(null, json.data);
       }
