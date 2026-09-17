@@ -256,7 +256,7 @@ impl ILayoutProcessorFactory<LGraph> for IntermediateProcessorStrategy {
             IntermediateProcessorStrategy::SelfLoopPostprocessor => Box::new(SelfLoopPostProcessor),
             IntermediateProcessorStrategy::SelfLoopRouter => Box::new(SelfLoopRouter),
             IntermediateProcessorStrategy::InteractiveExternalPortPositioner => {
-                Box::new(InteractiveExternalPortPositioner)
+                Box::new(InteractiveExternalPortPositioner::default())
             }
             IntermediateProcessorStrategy::HierarchicalNodeResizer => {
                 Box::new(HierarchicalNodeResizingProcessor)

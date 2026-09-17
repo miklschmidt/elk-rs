@@ -112,3 +112,12 @@ fn assert_parity(group: &str, ids: &[&str]) {
 fn compound_node_port_without_inner_edges_follows_the_other_ports() {
     assert_parity("focused", &["compound-port-without-inner-edges"]);
 }
+
+/// Interactive layouts of graphs with external ports used to deadlock in
+/// InteractiveExternalPortPositioner, which locked a dummy and then the node at the other end of
+/// its edge: the dummy itself.
+#[test]
+fn interactive_layout_with_external_ports_returns() {
+    assert_parity("frame", &["ryy99v", "fiebzn"]);
+    assert_parity("nested", &["fmkzhl", "5lpmaz"]);
+}
