@@ -16,7 +16,6 @@ use org_eclipse_elk_core::org::eclipse::elk::core::options::size_options::SizeOp
 use org_eclipse_elk_core::org::eclipse::elk::core::util::elk_util::ElkUtil;
 use org_eclipse_elk_core::org::eclipse::elk::core::util::{EnumSet, IElkProgressMonitor};
 use org_eclipse_elk_core::org::eclipse::elk::core::util::elk_trace::ElkTrace;
-use std::collections::HashSet;
 
 fn trace_resize(message: &str) {
     if ElkTrace::global().trace {
@@ -101,20 +100,10 @@ fn graph_layout_to_node(node: &LNodeRef, lgraph: &mut LGraph) {
     };
     // Process external ports
     let layerless_nodes = lgraph.layerless_nodes().clone();
-    let east_edge_less_external_dummy_count = layerless_nodes
-        .iter()
-        .filter(|child_node| {
-            let ext_port_side = child_node
-                .lock()
-                .get_property(InternalProperties::EXT_PORT_SIDE)
-                .unwrap_or(PortSide::Undefined);
-            ext_port_side == PortSide::East && external_dummy_edge_count(child_node) == 0
-        })
-        .count();
 
     for child_node in &layerless_nodes {
-        let (port_ref, ext_port_side, dummy_pos_y) = {
-            let mut child_guard = child_node.lock();
+        let (port_ref, ext_port_side) = {
+            let child_guard = child_node.lock();
             let port_ref = match child_guard.get_property(InternalProperties::ORIGIN) {
                 Some(Origin::LPort(port_ref)) => port_ref,
                 _ => continue,
@@ -122,8 +111,7 @@ fn graph_layout_to_node(node: &LNodeRef, lgraph: &mut LGraph) {
             let ext_port_side = child_guard
                 .get_property(InternalProperties::EXT_PORT_SIDE)
                 .unwrap_or(PortSide::Undefined);
-            let dummy_pos_y = child_guard.shape().position_ref().y;
-            (port_ref, ext_port_side, dummy_pos_y)
+            (port_ref, ext_port_side)
         };
 
         trace_resize("external port dummy found");
@@ -134,18 +122,8 @@ fn graph_layout_to_node(node: &LNodeRef, lgraph: &mut LGraph) {
             *port_guard.shape().size_ref()
         };
 
-        let mut port_position =
+        let port_position =
             get_external_port_position_for_graph(lgraph, child_node, port_size.x, port_size.y);
-        let allow_edge_less_self_loop =
-            east_edge_less_external_dummy_count == 1 && external_dummy_edge_count(child_node) == 0;
-        let pure_self_loop =
-            ext_port_side == PortSide::East
-                && is_pure_self_loop_external_dummy(child_node, allow_edge_less_self_loop);
-        // For pure self-loop sources on the east side, Java effectively keeps the dummy's y-origin
-        // at the content top. Compensate the dummy y-shift here before writing back to the parent port.
-        if pure_self_loop {
-            port_position.y -= dummy_pos_y;
-        }
         if trace_external_ports {
             let (
                 dummy_pos,
@@ -191,12 +169,11 @@ fn graph_layout_to_node(node: &LNodeRef, lgraph: &mut LGraph) {
                 }
             };
             eprintln!(
-                "[ext-port] port_id={} dummy_id={} layer_id={} side={:?} pure_self_loop={} dummy_pos=({:.1},{:.1}) dummy_size=({:.1},{:.1}) margin=({:.1},{:.1}) labels=[{}] graph_pad=({:.1},{:.1},{:.1},{:.1}) graph_offset=({:.1},{:.1}) port_size=({:.1},{:.1}) port_pos=({:.1},{:.1})",
+                "[ext-port] port_id={} dummy_id={} layer_id={} side={:?} dummy_pos=({:.1},{:.1}) dummy_size=({:.1},{:.1}) margin=({:.1},{:.1}) labels=[{}] graph_pad=({:.1},{:.1},{:.1},{:.1}) graph_offset=({:.1},{:.1}) port_size=({:.1},{:.1}) port_pos=({:.1},{:.1})",
                 port_id,
                 dummy_id,
                 dummy_layer_id,
                 ext_port_side,
-                pure_self_loop,
                 dummy_pos.x,
                 dummy_pos.y,
                 dummy_size.x,
@@ -300,70 +277,6 @@ fn graph_layout_to_node(node: &LNodeRef, lgraph: &mut LGraph) {
 
 fn is_nested(graph: &LGraph) -> bool {
     graph.parent_node().is_some()
-}
-
-fn is_pure_self_loop_external_dummy(node: &LNodeRef, allow_edge_less: bool) -> bool {
-    let all_edges = external_dummy_edges(node);
-
-    // For some hierarchical self-loop sources, the edge chain is already consumed before this
-    // transfer step and the external dummy has no remaining incident edge.
-    let all_self = if all_edges.is_empty() {
-        allow_edge_less
-    } else {
-        all_edges.iter().all(edge_represents_self_loop)
-    };
-    all_self
-}
-
-fn external_dummy_edges(node: &LNodeRef) -> Vec<crate::org::eclipse::elk::alg::layered::graph::LEdgeRef> {
-    let ports = node.lock().ports().clone();
-
-    let mut all_edges = Vec::new();
-    let mut seen = HashSet::new();
-    for port in ports {
-        let (incoming, outgoing) = {
-            let port_guard = port.lock();
-            (
-                port_guard.incoming_edges().clone(),
-                port_guard.outgoing_edges().clone(),
-            )
-        };
-        for edge in incoming.into_iter().chain(outgoing) {
-            let edge_key = std::sync::Arc::as_ptr(&edge) as usize;
-            if seen.insert(edge_key) {
-                all_edges.push(edge);
-            }
-        }
-    }
-
-    all_edges
-}
-
-fn external_dummy_edge_count(node: &LNodeRef) -> usize {
-    external_dummy_edges(node).len()
-}
-
-fn edge_represents_self_loop(
-    edge: &crate::org::eclipse::elk::alg::layered::graph::LEdgeRef,
-) -> bool {
-    let origin_edge = {
-        let edge_guard = edge.lock();
-        if edge_guard.is_self_loop() {
-            return true;
-        }
-        edge_guard
-            .get_property(InternalProperties::ORIGIN)
-            .and_then(|origin| match origin {
-                Origin::LEdge(origin_edge) => Some(origin_edge),
-                _ => None,
-            })
-    };
-
-    origin_edge
-        .map(|origin_edge| {
-            origin_edge.lock().is_self_loop()
-        })
-        .unwrap_or(false)
 }
 
 fn get_external_port_position_for_graph(

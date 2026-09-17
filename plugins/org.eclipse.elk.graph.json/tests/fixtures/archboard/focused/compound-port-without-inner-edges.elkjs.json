@@ -1,0 +1,121 @@
+{
+ "id": "architecture:root",
+ "layoutOptions": {},
+ "children": [
+  {
+   "id": "server",
+   "width": 284,
+   "height": 96,
+   "ports": [
+    {
+     "id": "e1:boundary:0",
+     "width": 0,
+     "height": 0,
+     "layoutOptions": {
+      "elk.port.side": "WEST",
+      "elk.port.index": "0"
+     },
+     "x": 284,
+     "y": 48
+    }
+   ],
+   "layoutOptions": {},
+   "children": [
+    {
+     "id": "store",
+     "width": 260,
+     "height": 72,
+     "ports": [
+      {
+       "id": "e1:from",
+       "width": 0,
+       "height": 0,
+       "layoutOptions": {
+        "elk.port.side": "SOUTH",
+        "elk.port.index": "2"
+       },
+       "x": 260,
+       "y": 36
+      }
+     ],
+     "layoutOptions": {},
+     "x": 12,
+     "y": 12,
+     "$H": 281
+    }
+   ],
+   "x": 12,
+   "y": 12,
+   "$H": 16
+  },
+  {
+   "id": "pane",
+   "width": 260,
+   "height": 72,
+   "ports": [],
+   "layoutOptions": {},
+   "x": 316,
+   "y": 34,
+   "$H": 284
+  }
+ ],
+ "edges": [
+  {
+   "id": "e1",
+   "sources": [
+    "e1:from"
+   ],
+   "targets": [
+    "e1:boundary:0"
+   ],
+   "labels": [],
+   "sections": [
+    {
+     "id": "e1_s0",
+     "startPoint": {
+      "x": 272,
+      "y": 48
+     },
+     "endPoint": {
+      "x": 284,
+      "y": 48
+     },
+     "incomingShape": "e1:from",
+     "outgoingShape": "e1:boundary:0"
+    }
+   ],
+   "container": "server"
+  },
+  {
+   "id": "e5",
+   "sources": [
+    "server"
+   ],
+   "targets": [
+    "pane"
+   ],
+   "labels": [],
+   "sections": [
+    {
+     "id": "e5_s0",
+     "startPoint": {
+      "x": 296,
+      "y": 70
+     },
+     "endPoint": {
+      "x": 316,
+      "y": 70
+     },
+     "incomingShape": "server",
+     "outgoingShape": "pane"
+    }
+   ],
+   "container": "architecture:root"
+  }
+ ],
+ "$H": 13,
+ "x": 0,
+ "y": 0,
+ "width": 588,
+ "height": 120
+}

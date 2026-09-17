@@ -10,3 +10,4 @@ mod layout_options_test;
 mod root_external_ports_test;
 mod sections_test;
 mod transfer_layout_test;
+mod archboard_parity_test;
