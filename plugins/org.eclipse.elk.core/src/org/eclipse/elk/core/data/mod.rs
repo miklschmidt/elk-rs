@@ -1,7 +1,8 @@
 use std::any::Any;
 use std::collections::{BTreeSet, HashMap, HashSet, LinkedList};
+use std::cell::RefCell;
 use std::sync::{Arc, OnceLock};
-use org_eclipse_elk_graph::org::eclipse::elk::graph::util::elk_mutex::Mutex;
+use org_eclipse_elk_graph::org::eclipse::elk::graph::util::read_mostly::ReadMostly;
 
 use org_eclipse_elk_graph::org::eclipse::elk::graph::properties::GraphFeature;
 use org_eclipse_elk_graph::org::eclipse::elk::graph::util::ElkReflect;
@@ -46,17 +47,16 @@ type LayoutProviderPool = Arc<
 >;
 
 pub struct LayoutMetaDataService {
-    storage: Mutex<LayoutMetaDataStorage>,
+    /// Registered once, then read by every layout on every thread.
+    storage: ReadMostly<LayoutMetaDataStorage>,
 }
 
+#[derive(Clone)]
 struct LayoutMetaDataStorage {
     algorithms: HashMap<String, LayoutAlgorithmData>,
     options: HashMap<String, LayoutOptionData>,
     legacy_options: HashMap<String, LayoutOptionData>,
     categories: HashMap<String, LayoutCategoryData>,
-    /// Suffix lookups already resolved, to the id of the algorithm they found.
-    algorithm_suffix_map: HashMap<String, String>,
-    option_suffix_map: HashMap<String, LayoutOptionData>,
 }
 
 impl LayoutMetaDataStorage {
@@ -66,10 +66,55 @@ impl LayoutMetaDataStorage {
             options: HashMap::new(),
             legacy_options: HashMap::new(),
             categories: HashMap::new(),
-            algorithm_suffix_map: HashMap::new(),
-            option_suffix_map: HashMap::new(),
         }
     }
+
+    fn insert_algorithm(&mut self, algorithm: LayoutAlgorithmData) {
+        self.algorithms.insert(algorithm.id().to_string(), algorithm);
+    }
+
+    fn insert_option(&mut self, option: LayoutOptionData) {
+        for legacy_id in option.legacy_ids() {
+            self.legacy_options
+                .insert(legacy_id.to_string(), option.clone());
+        }
+        self.options.insert(option.id().to_string(), option);
+    }
+
+    fn insert_category(&mut self, category: LayoutCategoryData) {
+        self.categories.insert(category.id().to_string(), category);
+    }
+}
+
+/// Suffix lookups this thread already resolved, to the id of the algorithm or option they
+/// found, valid for one generation of the registered metadata.
+struct SuffixCache {
+    generation: usize,
+    algorithms: HashMap<String, String>,
+    options: HashMap<String, String>,
+}
+
+thread_local! {
+    static SUFFIX_CACHE: RefCell<SuffixCache> = RefCell::new(SuffixCache {
+        generation: usize::MAX,
+        algorithms: HashMap::new(),
+        options: HashMap::new(),
+    });
+}
+
+/// Run `use_cache` on this thread's suffix cache, emptied if metadata changed since it was filled.
+/// The cache keeps ids, not copies: the data behind an id can still change (a provider pool is
+/// installed after registration) and lookups must see that.
+fn with_suffix_cache<R>(generation: usize, use_cache: impl FnOnce(&mut SuffixCache) -> R) -> R {
+    SUFFIX_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.generation != generation {
+            cache.generation = generation;
+            cache.algorithms.clear();
+            cache.options.clear();
+        }
+        use_cache(&mut cache)
+    })
 }
 
 static INSTANCE: OnceLock<LayoutMetaDataService> = OnceLock::new();
@@ -79,7 +124,7 @@ impl LayoutMetaDataService {
         INSTANCE.get_or_init(|| {
             LayoutMetaDataService::init_elk_reflect();
             let service = LayoutMetaDataService {
-                storage: Mutex::new(LayoutMetaDataStorage::new()),
+                storage: ReadMostly::new(LayoutMetaDataStorage::new()),
             };
             service.register_core_algorithms();
             service.register_layout_meta_data_provider(
@@ -99,13 +144,15 @@ impl LayoutMetaDataService {
         // OnceLock cannot be reset safely without unsafe; keep as no-op for now.
     }
 
+    /// Register the algorithms, options and categories of each provider. A provider's data is
+    /// collected first and committed as one update, so a layout on another thread sees it either
+    /// completely or not at all.
     pub fn register_layout_meta_data_providers(&self, providers: &[&dyn ILayoutMetaDataProvider]) {
         for provider in providers {
-            let mut registry = Registry::new(self);
+            let mut registry = Registry::new();
             provider.apply(&mut registry);
-            registry.apply_dependencies();
+            self.storage.update(|storage| registry.commit(storage));
         }
-        let mut storage = self.storage.lock();        storage.option_suffix_map.clear();
     }
 
     pub fn register_layout_meta_data_provider(&self, provider: &dyn ILayoutMetaDataProvider) {
@@ -113,41 +160,26 @@ impl LayoutMetaDataService {
     }
 
     pub fn override_algorithm_provider_pool(&self, algorithm_id: &str, pool: LayoutProviderPool) {
-        let mut storage = self.storage.lock();        if let Some(algorithm_data) = storage.algorithms.get_mut(algorithm_id) {
-            algorithm_data.set_provider_pool(Some(pool));
-        }
+        self.storage.update(|storage| {
+            if let Some(algorithm_data) = storage.algorithms.get_mut(algorithm_id) {
+                algorithm_data.set_provider_pool(Some(pool));
+            }
+        });
     }
 
     fn register_layout_algorithm(&self, algorithm: LayoutAlgorithmData) {
-        let mut storage = self.storage.lock();        storage
-            .algorithms
-            .insert(algorithm.id().to_string(), algorithm);
-        // A new algorithm can make a resolved suffix ambiguous.
-        storage.algorithm_suffix_map.clear();
-    }
-
-    fn register_layout_option(&self, option: LayoutOptionData) {
-        let mut storage = self.storage.lock();        let id = option.id().to_string();
-        storage.options.insert(id, option.clone());
-        for legacy_id in option.legacy_ids() {
-            storage
-                .legacy_options
-                .insert(legacy_id.to_string(), option.clone());
-        }
-    }
-
-    fn register_layout_category(&self, category: LayoutCategoryData) {
-        let mut storage = self.storage.lock();        storage
-            .categories
-            .insert(category.id().to_string(), category);
+        self.storage
+            .update(|storage| storage.insert_algorithm(algorithm));
     }
 
     pub fn get_algorithm_data(&self, algorithm_id: &str) -> Option<LayoutAlgorithmData> {
-        let storage = self.storage.lock();        storage.algorithms.get(algorithm_id).cloned()
+        self.storage
+            .read(|storage| storage.algorithms.get(algorithm_id).cloned())
     }
 
     pub fn get_algorithm_data_list(&self) -> Vec<LayoutAlgorithmData> {
-        let storage = self.storage.lock();        storage.algorithms.values().cloned().collect()
+        self.storage
+            .read(|storage| storage.algorithms.values().cloned().collect())
     }
 
     pub fn get_algorithm_data_by_suffix(&self, suffix: &str) -> Option<LayoutAlgorithmData> {
@@ -155,30 +187,30 @@ impl LayoutMetaDataService {
             return None;
         }
 
-        let mut storage = self.storage.lock();
-        // The cache holds the algorithm's id, not a copy of its data: the data can still change
-        // (its provider pool is overridden after registration) and lookups must see that.
-        if let Some(id) = storage.algorithm_suffix_map.get(suffix) {
-            return storage.algorithms.get(id).cloned();
-        }
-
-        let mut match_data: Option<LayoutAlgorithmData> = None;
-        for data in storage.algorithms.values() {
-            let id = data.id();
-            if id_matches_suffix(id, suffix) {
-                if match_data.is_some() {
-                    return None;
+        let generation = self.storage.generation();
+        self.storage.read(|storage| {
+            with_suffix_cache(generation, |cache| {
+                if let Some(id) = cache.algorithms.get(suffix) {
+                    return storage.algorithms.get(id).cloned();
                 }
-                match_data = Some(data.clone());
-            }
-        }
 
-        if let Some(data) = match_data.as_ref() {
-            let id = data.id().to_string();
-            storage.algorithm_suffix_map.insert(suffix.to_string(), id);
-        }
+                let mut match_data: Option<&LayoutAlgorithmData> = None;
+                for data in storage.algorithms.values() {
+                    if id_matches_suffix(data.id(), suffix) {
+                        if match_data.is_some() {
+                            return None;
+                        }
+                        match_data = Some(data);
+                    }
+                }
 
-        match_data
+                let data = match_data?;
+                cache
+                    .algorithms
+                    .insert(suffix.to_string(), data.id().to_string());
+                Some(data.clone())
+            })
+        })
     }
 
     pub fn get_algorithm_data_by_suffix_or_default(
@@ -208,15 +240,18 @@ impl LayoutMetaDataService {
     }
 
     pub fn get_option_data(&self, option_id: &str) -> Option<LayoutOptionData> {
-        let storage = self.storage.lock();        storage
-            .options
-            .get(option_id)
-            .cloned()
-            .or_else(|| storage.legacy_options.get(option_id).cloned())
+        self.storage.read(|storage| {
+            storage
+                .options
+                .get(option_id)
+                .or_else(|| storage.legacy_options.get(option_id))
+                .cloned()
+        })
     }
 
     pub fn get_option_data_list(&self) -> Vec<LayoutOptionData> {
-        let storage = self.storage.lock();        storage.options.values().cloned().collect()
+        self.storage
+            .read(|storage| storage.options.values().cloned().collect())
     }
 
     pub fn get_option_data_by_suffix(&self, suffix: &str) -> Option<LayoutOptionData> {
@@ -224,41 +259,43 @@ impl LayoutMetaDataService {
             return None;
         }
 
-        let mut storage = self.storage.lock();        if let Some(data) = storage.option_suffix_map.get(suffix) {
-            return Some(data.clone());
-        }
-
-        let mut match_data: Option<LayoutOptionData> = None;
-        for data in storage.options.values() {
-            let id = data.id();
-            if id_matches_suffix(id, suffix) {
-                if match_data.is_some() {
-                    return None;
+        let generation = self.storage.generation();
+        self.storage.read(|storage| {
+            with_suffix_cache(generation, |cache| {
+                if let Some(id) = cache.options.get(suffix) {
+                    return storage.options.get(id).cloned();
                 }
-                match_data = Some(data.clone());
-            }
-        }
 
-        if match_data.is_none() {
-            for data in storage.options.values() {
-                for legacy_id in data.legacy_ids() {
-                    if id_matches_suffix(legacy_id, suffix) {
+                let mut match_data: Option<&LayoutOptionData> = None;
+                for data in storage.options.values() {
+                    if id_matches_suffix(data.id(), suffix) {
                         if match_data.is_some() {
                             return None;
                         }
-                        match_data = Some(data.clone());
+                        match_data = Some(data);
                     }
                 }
-            }
-        }
 
-        if let Some(data) = match_data.as_ref() {
-            storage
-                .option_suffix_map
-                .insert(suffix.to_string(), data.clone());
-        }
+                if match_data.is_none() {
+                    for data in storage.options.values() {
+                        for legacy_id in data.legacy_ids() {
+                            if id_matches_suffix(legacy_id, suffix) {
+                                if match_data.is_some() {
+                                    return None;
+                                }
+                                match_data = Some(data);
+                            }
+                        }
+                    }
+                }
 
-        match_data
+                let data = match_data?;
+                cache
+                    .options
+                    .insert(suffix.to_string(), data.id().to_string());
+                Some(data.clone())
+            })
+        })
     }
 
     pub fn get_option_data_for_algorithm(
@@ -266,27 +303,31 @@ impl LayoutMetaDataService {
         algorithm_data: &LayoutAlgorithmData,
         target_type: LayoutOptionTarget,
     ) -> Vec<LayoutOptionData> {
-        let storage = self.storage.lock();        let algorithm_option_id =
+        let algorithm_option_id =
             crate::org::eclipse::elk::core::options::CoreOptions::ALGORITHM.id();
 
-        storage
-            .options
-            .values()
-            .filter(|option_data| {
-                algorithm_data.knows_option(option_data.id())
-                    || option_data.id() == algorithm_option_id
-            })
-            .filter(|option_data| option_data.targets().contains(&target_type))
-            .cloned()
-            .collect()
+        self.storage.read(|storage| {
+            storage
+                .options
+                .values()
+                .filter(|option_data| {
+                    algorithm_data.knows_option(option_data.id())
+                        || option_data.id() == algorithm_option_id
+                })
+                .filter(|option_data| option_data.targets().contains(&target_type))
+                .cloned()
+                .collect()
+        })
     }
 
     pub fn get_category_data(&self, category_id: &str) -> Option<LayoutCategoryData> {
-        let storage = self.storage.lock();        storage.categories.get(category_id).cloned()
+        self.storage
+            .read(|storage| storage.categories.get(category_id).cloned())
     }
 
     pub fn get_category_data_list(&self) -> Vec<LayoutCategoryData> {
-        let storage = self.storage.lock();        storage.categories.values().cloned().collect()
+        self.storage
+            .read(|storage| storage.categories.values().cloned().collect())
     }
 
     pub fn init_elk_reflect() {
@@ -381,13 +422,12 @@ impl LayoutMetaDataService {
     }
 
     fn register_core_algorithms(&self) {
-        let storage = self.storage.lock();        if storage
-            .algorithms
-            .contains_key(FixedLayouterOptions::ALGORITHM_ID)
-        {
+        let registered = self
+            .storage
+            .read(|storage| storage.algorithms.contains_key(FixedLayouterOptions::ALGORITHM_ID));
+        if registered {
             return;
         }
-        drop(storage);
 
         fn arc_any<T: Any + Send + Sync>(value: T) -> Option<Arc<dyn Any + Send + Sync>> {
             Some(Arc::new(value))
@@ -537,28 +577,42 @@ impl LayoutMetaDataService {
     }
 }
 
-struct Registry<'a> {
-    service: &'a LayoutMetaDataService,
+/// What one provider registers, committed to the storage in one update.
+struct Registry {
+    entries: Vec<RegistryEntry>,
     option_dependencies: Vec<Triple>,
     option_support: Vec<Triple>,
 }
 
-impl<'a> Registry<'a> {
-    fn new(service: &'a LayoutMetaDataService) -> Self {
+enum RegistryEntry {
+    Algorithm(LayoutAlgorithmData),
+    Option(LayoutOptionData),
+    Category(LayoutCategoryData),
+}
+
+impl Registry {
+    fn new() -> Self {
         Registry {
-            service,
+            entries: Vec::new(),
             option_dependencies: Vec::new(),
             option_support: Vec::new(),
         }
     }
 
-    fn apply_dependencies(&mut self) {
-        let mut storage = self.service.storage.lock();
+    fn commit(self, storage: &mut LayoutMetaDataStorage) {
+        for entry in self.entries {
+            match entry {
+                RegistryEntry::Algorithm(algorithm) => storage.insert_algorithm(algorithm),
+                RegistryEntry::Option(option) => storage.insert_option(option),
+                RegistryEntry::Category(category) => storage.insert_category(category),
+            }
+        }
+
         let algorithms: Vec<LayoutAlgorithmData> = storage.algorithms.values().cloned().collect();
         for algorithm in algorithms {
             let category_id = algorithm.category_id().unwrap_or("");
             let category = if category_id.is_empty() {
-                retrieve_backup_category(&mut storage)
+                retrieve_backup_category(storage)
             } else {
                 storage.categories.get_mut(category_id)
             };
@@ -583,7 +637,6 @@ impl<'a> Registry<'a> {
                 ));
             }
         }
-        self.option_dependencies.clear();
 
         for sup in &self.option_support {
             let option_id = storage
@@ -596,21 +649,20 @@ impl<'a> Registry<'a> {
                 algorithm.add_known_option_default(option_id, sup.value.as_ref().map(Arc::clone));
             }
         }
-        self.option_support.clear();
     }
 }
 
-impl LayoutMetaDataRegistry for Registry<'_> {
+impl LayoutMetaDataRegistry for Registry {
     fn register_algorithm(&mut self, algorithm_data: LayoutAlgorithmData) {
-        self.service.register_layout_algorithm(algorithm_data);
+        self.entries.push(RegistryEntry::Algorithm(algorithm_data));
     }
 
     fn register_option(&mut self, option_data: LayoutOptionData) {
-        self.service.register_layout_option(option_data);
+        self.entries.push(RegistryEntry::Option(option_data));
     }
 
     fn register_category(&mut self, category_data: LayoutCategoryData) {
-        self.service.register_layout_category(category_data);
+        self.entries.push(RegistryEntry::Category(category_data));
     }
 
     fn add_dependency(

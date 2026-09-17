@@ -1,6 +1,6 @@
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use crate::org::eclipse::elk::graph::{
     ElkConnectableShapeRef, ElkEdgeRef, ElkGraphElementRef, ElkGraphFactory, ElkLabelRef,
@@ -9,8 +9,9 @@ use crate::org::eclipse::elk::graph::{
 
 pub mod elk_mutex;
 mod graph_identifier_generator;
+pub mod read_mostly;
 
-use self::elk_mutex::Mutex;
+use self::read_mostly::ReadMostly;
 
 pub use graph_identifier_generator::GraphIdentifierGenerator;
 
@@ -19,32 +20,40 @@ pub struct ElkReflect;
 type NewInstanceFn = Box<dyn Fn() -> Box<dyn Any + Send + Sync> + Send + Sync>;
 type CloneFn = Box<dyn Fn(&dyn Any) -> Option<Box<dyn Any + Send + Sync>> + Send + Sync>;
 
-static NEW_REGISTRY: OnceLock<Mutex<HashMap<TypeId, NewInstanceFn>>> = OnceLock::new();
-static CLONE_REGISTRY: OnceLock<Mutex<HashMap<TypeId, CloneFn>>> = OnceLock::new();
+/// The registered constructors and clone functions.
+#[derive(Default, Clone)]
+struct Registry {
+    new_instance: HashMap<TypeId, Arc<NewInstanceFn>>,
+    clone: HashMap<TypeId, Arc<CloneFn>>,
+}
+
+/// Read on every read of a property that is not set, by every thread laying a graph out.
+static REGISTRY: OnceLock<ReadMostly<Registry>> = OnceLock::new();
+
+fn registry() -> &'static ReadMostly<Registry> {
+    REGISTRY.get_or_init(|| ReadMostly::new(Registry::default()))
+}
 
 impl ElkReflect {
     pub fn register<T: Send + Sync + 'static>(
         new_instance: Option<fn() -> T>,
         clone_fn: Option<fn(&T) -> T>,
     ) {
-        if let Some(new_instance) = new_instance {
-            let registry = NEW_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
-            registry.lock().insert(
-                TypeId::of::<T>(),
-                Box::new(move || Box::new(new_instance()) as Box<dyn Any + Send + Sync>),
-            );
-        }
-        if let Some(clone_fn) = clone_fn {
-            let registry = CLONE_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
-            registry.lock().insert(
-                TypeId::of::<T>(),
-                Box::new(move |value: &dyn Any| {
+        registry().update(|registry| {
+            if let Some(new_instance) = new_instance {
+                let ctor: NewInstanceFn =
+                    Box::new(move || Box::new(new_instance()) as Box<dyn Any + Send + Sync>);
+                registry.new_instance.insert(TypeId::of::<T>(), Arc::new(ctor));
+            }
+            if let Some(clone_fn) = clone_fn {
+                let clone: CloneFn = Box::new(move |value: &dyn Any| {
                     value
                         .downcast_ref::<T>()
                         .map(|typed| Box::new(clone_fn(typed)) as Box<dyn Any + Send + Sync>)
-                }),
-            );
-        }
+                });
+                registry.clone.insert(TypeId::of::<T>(), Arc::new(clone));
+            }
+        });
     }
 
     pub fn register_new_instance<T: Send + Sync + 'static>(new_instance: fn() -> T) {
@@ -60,35 +69,35 @@ impl ElkReflect {
     }
 
     pub fn new_instance<T: Send + Sync + 'static>() -> Option<T> {
-        let registry = NEW_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
-        registry
-            .lock()
-            .get(&TypeId::of::<T>())
-            .and_then(|ctor| ctor().downcast::<T>().ok())
+        registry()
+            .read(|registry| registry.new_instance.get(&TypeId::of::<T>()).map(|ctor| ctor()))
+            .and_then(|boxed| boxed.downcast::<T>().ok())
             .map(|boxed| *boxed)
     }
 
     pub fn clone_value<T: Send + Sync + 'static>(value: &T) -> Option<T> {
-        let registry = CLONE_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
-        registry
-            .lock()
-            .get(&TypeId::of::<T>())
-            .and_then(|clone_fn| clone_fn(value as &dyn Any))
+        registry()
+            .read(|registry| {
+                registry
+                    .clone
+                    .get(&TypeId::of::<T>())
+                    .and_then(|clone_fn| clone_fn(value as &dyn Any))
+            })
             .and_then(|boxed| boxed.downcast::<T>().ok())
             .map(|boxed| *boxed)
     }
 
     pub fn clone_any(value: &dyn Any) -> Option<Box<dyn Any + Send + Sync>> {
-        let registry = CLONE_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
-        registry
-            .lock()
-            .get(&value.type_id())
-            .and_then(|clone_fn| clone_fn(value))
+        registry().read(|registry| {
+            registry
+                .clone
+                .get(&value.type_id())
+                .and_then(|clone_fn| clone_fn(value))
+        })
     }
 
     pub fn has_clone<T: Send + Sync + 'static>() -> bool {
-        let registry = CLONE_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
-        registry.lock().contains_key(&TypeId::of::<T>())
+        registry().read(|registry| registry.clone.contains_key(&TypeId::of::<T>()))
     }
 }
 
