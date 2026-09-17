@@ -80,6 +80,16 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+      # ELK's Maven/Tycho build downloads its Maven dependencies and Eclipse p2 repositories
+      # into the local repository (p2 under .cache/tycho); keep them between runs.
+      - uses: actions/cache@v4
+        with:
+          # ELK's own artifacts are rebuilt and installed on every run; do not keep stale ones.
+          path: |
+            ~/.m2/repository
+            !~/.m2/repository/org/eclipse/elk
+          key: parity-m2-${{ runner.os }}-${{ hashFiles('external/elk/**/pom.xml', 'external/elk/**/*.target') }}
+          restore-keys: parity-m2-${{ runner.os }}-
       - uses: dtolnay/rust-toolchain@stable
       - name: Run parity scripts
         run: sh scripts/run_parity_all.sh
@@ -158,8 +168,10 @@ jobs:
           # below read the Java sources this build generates into external/elk (src-gen).
           JAVA_PARITY_EXTERNAL_ISOLATE: "false"
           JAVA_PARITY_EXTERNAL_WORKTREE_ROOT: ${{ runner.temp }}
-          # Isolate Tycho/Maven metadata to avoid lock conflicts on shared runners.
-          JAVA_PARITY_MVN_LOCAL_REPO: ${{ runner.temp }}/m2-java-parity-${{ github.run_id }}-${{ github.run_attempt }}
+          # The repository the cache step restores; each hosted runner is a fresh machine.
+          JAVA_PARITY_MVN_LOCAL_REPO: /home/runner/.m2/repository
+          # Log the build, not every artifact and p2 download.
+          JAVA_PARITY_MVN_ARGS: --batch-mode --no-transfer-progress
           JAVA_RESULTS_PARITY_GATE: ${{ inputs.java_parity_gate }}
           JAVA_BASELINE_FILE: tests/baselines/java_layered_issue_scenarios.csv
           JAVA_BASELINE_OUTPUT: tests/java_vs_rust_baseline.md
