@@ -9,6 +9,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The Rust tests load ELK's example graphs and test models from these submodules.
+      - name: Check out the ELK sources and models the tests read
+        run: git submodule update --init --depth 1 external/elk external/elk-models
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
