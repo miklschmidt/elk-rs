@@ -63,6 +63,12 @@ impl LayoutOptionDependency {
 
 #[derive(Clone)]
 pub struct LayoutOptionData {
+    /// Registered once and then only read: clones share it.
+    inner: Arc<LayoutOptionDataInner>,
+}
+
+#[derive(Clone)]
+struct LayoutOptionDataInner {
     id: String,
     group: String,
     legacy_ids: Vec<String>,
@@ -86,74 +92,74 @@ impl LayoutOptionData {
     }
 
     pub fn id(&self) -> &str {
-        &self.id
+        &self.inner.id
     }
 
     pub fn group(&self) -> &str {
-        &self.group
+        &self.inner.group
     }
 
     pub fn legacy_ids(&self) -> &[String] {
-        &self.legacy_ids
+        &self.inner.legacy_ids
     }
 
     pub fn option_type(&self) -> LayoutOptionType {
-        self.option_type
+        self.inner.option_type
     }
 
     pub fn name(&self) -> &str {
-        &self.name
+        &self.inner.name
     }
 
     pub fn description(&self) -> &str {
-        &self.description
+        &self.inner.description
     }
 
     pub fn targets(&self) -> &HashSet<LayoutOptionTarget> {
-        &self.targets
+        &self.inner.targets
     }
 
     pub fn visibility(&self) -> LayoutOptionVisibility {
-        self.visibility
+        self.inner.visibility
     }
 
     pub fn value_type_id(&self) -> Option<TypeId> {
-        self.value_type_id
+        self.inner.value_type_id
     }
 
     pub fn default_value(&self) -> Option<Arc<dyn Any + Send + Sync>> {
-        self.default_value.as_ref().map(Arc::clone)
+        self.inner.default_value.as_ref().map(Arc::clone)
     }
 
     pub fn lower_bound(&self) -> Option<Arc<dyn Any + Send + Sync>> {
-        self.lower_bound.as_ref().map(Arc::clone)
+        self.inner.lower_bound.as_ref().map(Arc::clone)
     }
 
     pub fn upper_bound(&self) -> Option<Arc<dyn Any + Send + Sync>> {
-        self.upper_bound.as_ref().map(Arc::clone)
+        self.inner.upper_bound.as_ref().map(Arc::clone)
     }
 
     pub fn set_lower_bound(&mut self, lower_bound: Option<Arc<dyn Any + Send + Sync>>) {
-        self.lower_bound = lower_bound;
+        Arc::make_mut(&mut self.inner).lower_bound = lower_bound;
     }
 
     pub fn set_upper_bound(&mut self, upper_bound: Option<Arc<dyn Any + Send + Sync>>) {
-        self.upper_bound = upper_bound;
+        Arc::make_mut(&mut self.inner).upper_bound = upper_bound;
     }
 
     pub fn dependencies(&self) -> &[LayoutOptionDependency] {
-        &self.dependencies
+        &self.inner.dependencies
     }
 
     pub fn dependencies_mut(&mut self) -> &mut Vec<LayoutOptionDependency> {
-        &mut self.dependencies
+        &mut Arc::make_mut(&mut self.inner).dependencies
     }
 
     pub fn can_parse_value(&self) -> bool {
-        match self.option_type {
+        match self.inner.option_type {
             LayoutOptionType::Undefined => false,
             LayoutOptionType::Enum | LayoutOptionType::EnumSet | LayoutOptionType::Object => {
-                self.parser.is_some()
+                self.inner.parser.is_some()
             }
             _ => true,
         }
@@ -163,11 +169,11 @@ impl LayoutOptionData {
         if value_string == "null" {
             return None;
         }
-        if value_string.is_empty() && self.option_type != LayoutOptionType::EnumSet {
+        if value_string.is_empty() && self.inner.option_type != LayoutOptionType::EnumSet {
             return None;
         }
 
-        match self.option_type {
+        match self.inner.option_type {
             LayoutOptionType::Boolean => {
                 if value_string.eq_ignore_ascii_case("true") {
                     Some(Arc::new(true))
@@ -189,7 +195,7 @@ impl LayoutOptionData {
                 Some(Arc::new(value_string.to_string()) as Arc<dyn Any + Send + Sync>)
             }
             LayoutOptionType::Enum | LayoutOptionType::EnumSet | LayoutOptionType::Object => {
-                let parser = self.parser.as_ref()?;
+                let parser = self.inner.parser.as_ref()?;
                 parser(value_string)
             }
             LayoutOptionType::Undefined => None,
@@ -197,7 +203,7 @@ impl LayoutOptionData {
     }
 
     pub fn default_default_value(&self) -> Option<Arc<dyn Any + Send + Sync>> {
-        match self.option_type {
+        match self.inner.option_type {
             LayoutOptionType::String => Some(Arc::new(String::new())),
             LayoutOptionType::Boolean => Some(Arc::new(false)),
             LayoutOptionType::Int => Some(Arc::new(0_i32)),
@@ -208,26 +214,27 @@ impl LayoutOptionData {
     }
 
     pub fn choices(&self) -> Vec<String> {
-        match self.option_type {
+        match self.inner.option_type {
             LayoutOptionType::Boolean => vec!["false".to_string(), "true".to_string()],
             LayoutOptionType::Enum | LayoutOptionType::EnumSet => {
-                self.choices.clone().unwrap_or_default()
+                self.inner.choices.clone().unwrap_or_default()
             }
             _ => Vec::new(),
         }
     }
 
     pub fn enum_value_count(&self) -> usize {
-        match self.option_type {
+        match self.inner.option_type {
             LayoutOptionType::Enum | LayoutOptionType::EnumSet => {
-                self.choices.as_ref().map(|v| v.len()).unwrap_or(0)
+                self.inner.choices.as_ref().map(|v| v.len()).unwrap_or(0)
             }
             _ => 0,
         }
     }
 
     pub fn enum_value_name(&self, index: usize) -> Option<&str> {
-        self.choices
+        self.inner
+            .choices
             .as_ref()
             .and_then(|values| values.get(index))
             .map(|value| value.as_str())
@@ -251,14 +258,14 @@ impl ILayoutMetaData for LayoutOptionData {
 impl std::fmt::Debug for LayoutOptionData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LayoutOptionData")
-            .field("id", &self.id)
+            .field("id", &self.inner.id)
             .finish()
     }
 }
 
 impl PartialEq for LayoutOptionData {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
+        self.inner.id == other.inner.id
     }
 }
 
@@ -266,7 +273,7 @@ impl Eq for LayoutOptionData {}
 
 impl Hash for LayoutOptionData {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
+        self.inner.id.hash(state);
     }
 }
 
@@ -379,21 +386,23 @@ impl LayoutOptionDataBuilder {
 
     pub fn create(self) -> LayoutOptionData {
         LayoutOptionData {
-            id: self.id.unwrap_or_default(),
-            group: self.group.unwrap_or_default(),
-            legacy_ids: self.legacy_ids,
-            default_value: self.default_value,
-            option_type: self.option_type,
-            name: self.name.unwrap_or_default(),
-            description: self.description.unwrap_or_default(),
-            targets: self.targets.unwrap_or_default(),
-            dependencies: Vec::new(),
-            visibility: self.visibility,
-            lower_bound: self.lower_bound,
-            upper_bound: self.upper_bound,
-            choices: self.choices,
-            value_type_id: self.value_type_id,
-            parser: self.parser,
+            inner: Arc::new(LayoutOptionDataInner {
+                id: self.id.unwrap_or_default(),
+                group: self.group.unwrap_or_default(),
+                legacy_ids: self.legacy_ids,
+                default_value: self.default_value,
+                option_type: self.option_type,
+                name: self.name.unwrap_or_default(),
+                description: self.description.unwrap_or_default(),
+                targets: self.targets.unwrap_or_default(),
+                dependencies: Vec::new(),
+                visibility: self.visibility,
+                lower_bound: self.lower_bound,
+                upper_bound: self.upper_bound,
+                choices: self.choices,
+                value_type_id: self.value_type_id,
+                parser: self.parser,
+            }),
         }
     }
 }

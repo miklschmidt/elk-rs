@@ -14,6 +14,12 @@ pub type ValidatorFactory = Arc<dyn Fn() -> Box<dyn IValidatingGraphElementVisit
 
 #[derive(Clone)]
 pub struct LayoutAlgorithmData {
+    /// Registered once and then only read: clones share it.
+    inner: Arc<LayoutAlgorithmDataInner>,
+}
+
+#[derive(Clone)]
+struct LayoutAlgorithmDataInner {
     id: String,
     name: String,
     description: String,
@@ -30,81 +36,85 @@ pub struct LayoutAlgorithmData {
 impl LayoutAlgorithmData {
     pub fn new(id: impl Into<String>) -> Self {
         LayoutAlgorithmData {
-            id: id.into(),
-            name: String::new(),
-            description: String::new(),
-            category_id: None,
-            bundle_name: None,
-            defining_bundle_id: None,
-            preview_image_path: None,
-            validator_factory: None,
-            provider_pool: None,
-            supported_features: HashSet::new(),
-            known_options: HashMap::new(),
+            inner: Arc::new(LayoutAlgorithmDataInner {
+                id: id.into(),
+                name: String::new(),
+                description: String::new(),
+                category_id: None,
+                bundle_name: None,
+                defining_bundle_id: None,
+                preview_image_path: None,
+                validator_factory: None,
+                provider_pool: None,
+                supported_features: HashSet::new(),
+                known_options: HashMap::new(),
+            }),
         }
     }
 
     pub fn with_validator(id: impl Into<String>, factory: ValidatorFactory) -> Self {
         LayoutAlgorithmData {
-            id: id.into(),
-            name: String::new(),
-            description: String::new(),
-            category_id: None,
-            bundle_name: None,
-            defining_bundle_id: None,
-            preview_image_path: None,
-            validator_factory: Some(factory),
-            provider_pool: None,
-            supported_features: HashSet::new(),
-            known_options: HashMap::new(),
+            inner: Arc::new(LayoutAlgorithmDataInner {
+                id: id.into(),
+                name: String::new(),
+                description: String::new(),
+                category_id: None,
+                bundle_name: None,
+                defining_bundle_id: None,
+                preview_image_path: None,
+                validator_factory: Some(factory),
+                provider_pool: None,
+                supported_features: HashSet::new(),
+                known_options: HashMap::new(),
+            }),
         }
     }
 
     pub fn id(&self) -> &str {
-        &self.id
+        &self.inner.id
     }
 
     pub fn name(&self) -> &str {
-        &self.name
+        &self.inner.name
     }
 
     pub fn description(&self) -> &str {
-        &self.description
+        &self.inner.description
     }
 
     pub fn category_id(&self) -> Option<&str> {
-        self.category_id.as_deref()
+        self.inner.category_id.as_deref()
     }
 
     pub fn bundle_name(&self) -> Option<&str> {
-        self.bundle_name.as_deref()
+        self.inner.bundle_name.as_deref()
     }
 
     pub fn defining_bundle_id(&self) -> Option<&str> {
-        self.defining_bundle_id.as_deref()
+        self.inner.defining_bundle_id.as_deref()
     }
 
     pub fn preview_image_path(&self) -> Option<&str> {
-        self.preview_image_path.as_deref()
+        self.inner.preview_image_path.as_deref()
     }
 
     pub fn set_name(&mut self, name: impl Into<String>) -> &mut Self {
-        self.name = name.into();
+        Arc::make_mut(&mut self.inner).name = name.into();
         self
     }
 
     pub fn set_description(&mut self, description: impl Into<String>) -> &mut Self {
-        self.description = description.into();
+        Arc::make_mut(&mut self.inner).description = description.into();
         self
     }
 
     pub fn set_category_id(&mut self, category_id: Option<impl Into<String>>) -> &mut Self {
-        self.category_id = category_id.map(Into::into);
+        Arc::make_mut(&mut self.inner).category_id = category_id.map(Into::into);
         self
     }
 
     pub fn set_bundle_name(&mut self, bundle_name: Option<impl Into<String>>) -> &mut Self {
-        self.bundle_name = bundle_name.map(Into::into);
+        Arc::make_mut(&mut self.inner).bundle_name = bundle_name.map(Into::into);
         self
     }
 
@@ -112,7 +122,7 @@ impl LayoutAlgorithmData {
         &mut self,
         defining_bundle_id: Option<impl Into<String>>,
     ) -> &mut Self {
-        self.defining_bundle_id = defining_bundle_id.map(Into::into);
+        Arc::make_mut(&mut self.inner).defining_bundle_id = defining_bundle_id.map(Into::into);
         self
     }
 
@@ -120,28 +130,28 @@ impl LayoutAlgorithmData {
         &mut self,
         preview_image_path: Option<impl Into<String>>,
     ) -> &mut Self {
-        self.preview_image_path = preview_image_path.map(Into::into);
+        Arc::make_mut(&mut self.inner).preview_image_path = preview_image_path.map(Into::into);
         self
     }
 
     pub fn validator_factory(&self) -> Option<&ValidatorFactory> {
-        self.validator_factory.as_ref()
+        self.inner.validator_factory.as_ref()
     }
 
     pub fn set_validator_factory(&mut self, factory: Option<ValidatorFactory>) -> &mut Self {
-        self.validator_factory = factory;
+        Arc::make_mut(&mut self.inner).validator_factory = factory;
         self
     }
 
     pub fn provider_pool(&self) -> Option<Arc<InstancePool<Box<dyn AbstractLayoutProvider>>>> {
-        self.provider_pool.clone()
+        self.inner.provider_pool.clone()
     }
 
     pub fn set_provider_pool(
         &mut self,
         pool: Option<Arc<InstancePool<Box<dyn AbstractLayoutProvider>>>>,
     ) -> &mut Self {
-        self.provider_pool = pool;
+        Arc::make_mut(&mut self.inner).provider_pool = pool;
         self
     }
 
@@ -149,12 +159,14 @@ impl LayoutAlgorithmData {
         mut self,
         pool: Arc<InstancePool<Box<dyn AbstractLayoutProvider>>>,
     ) -> Self {
-        self.provider_pool = Some(pool);
+        Arc::make_mut(&mut self.inner).provider_pool = Some(pool);
         self
     }
 
     pub fn add_known_option_id(&mut self, option_id: impl Into<String>) {
-        self.known_options.insert(option_id.into(), None);
+        Arc::make_mut(&mut self.inner)
+            .known_options
+            .insert(option_id.into(), None);
     }
 
     pub fn add_known_option_default(
@@ -162,38 +174,43 @@ impl LayoutAlgorithmData {
         option_id: impl Into<String>,
         default_value: Option<Arc<dyn Any + Send + Sync>>,
     ) {
-        self.known_options.insert(option_id.into(), default_value);
+        Arc::make_mut(&mut self.inner)
+            .known_options
+            .insert(option_id.into(), default_value);
     }
 
     pub fn knows_option(&self, option_id: &str) -> bool {
-        self.known_options.contains_key(option_id)
+        self.inner.known_options.contains_key(option_id)
     }
 
     pub fn known_option_ids(&self) -> impl Iterator<Item = &String> {
-        self.known_options.keys()
+        self.inner.known_options.keys()
     }
 
     pub fn default_value_any(&self, option_id: &str) -> Option<Arc<dyn Any + Send + Sync>> {
-        self.known_options
+        self.inner
+            .known_options
             .get(option_id)
             .and_then(|value| value.as_ref().map(Arc::clone))
     }
 
     pub fn supports_feature(&self, feature: GraphFeature) -> bool {
-        self.supported_features.contains(&feature)
+        self.inner.supported_features.contains(&feature)
     }
 
     pub fn supported_features(&self) -> &HashSet<GraphFeature> {
-        &self.supported_features
+        &self.inner.supported_features
     }
 
     pub fn add_supported_feature(&mut self, feature: GraphFeature) -> &mut Self {
-        self.supported_features.insert(feature);
+        Arc::make_mut(&mut self.inner)
+            .supported_features
+            .insert(feature);
         self
     }
 
     pub fn set_supported_features(&mut self, features: HashSet<GraphFeature>) -> &mut Self {
-        self.supported_features = features;
+        Arc::make_mut(&mut self.inner).supported_features = features;
         self
     }
 }
@@ -215,14 +232,14 @@ impl ILayoutMetaData for LayoutAlgorithmData {
 impl std::fmt::Debug for LayoutAlgorithmData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LayoutAlgorithmData")
-            .field("id", &self.id)
+            .field("id", &self.inner.id)
             .finish()
     }
 }
 
 impl PartialEq for LayoutAlgorithmData {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
+        self.inner.id == other.inner.id
     }
 }
 
@@ -230,6 +247,6 @@ impl Eq for LayoutAlgorithmData {}
 
 impl Hash for LayoutAlgorithmData {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
+        self.inner.id.hash(state);
     }
 }

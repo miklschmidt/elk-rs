@@ -86,12 +86,13 @@ impl LayoutMetaDataStorage {
     }
 }
 
-/// Suffix lookups this thread already resolved, to the id of the algorithm or option they
-/// found, valid for one generation of the registered metadata.
+/// Suffix lookups this thread already resolved, valid for one generation of the registered
+/// metadata. Every change to the metadata, a provider pool installed after registration
+/// included, starts a new generation, so the copies here are never stale.
 struct SuffixCache {
     generation: usize,
-    algorithms: HashMap<String, String>,
-    options: HashMap<String, String>,
+    algorithms: HashMap<String, LayoutAlgorithmData>,
+    options: HashMap<String, LayoutOptionData>,
 }
 
 thread_local! {
@@ -103,8 +104,6 @@ thread_local! {
 }
 
 /// Run `use_cache` on this thread's suffix cache, emptied if metadata changed since it was filled.
-/// The cache keeps ids, not copies: the data behind an id can still change (a provider pool is
-/// installed after registration) and lookups must see that.
 fn with_suffix_cache<R>(generation: usize, use_cache: impl FnOnce(&mut SuffixCache) -> R) -> R {
     SUFFIX_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
@@ -190,8 +189,8 @@ impl LayoutMetaDataService {
         let generation = self.storage.generation();
         self.storage.read(|storage| {
             with_suffix_cache(generation, |cache| {
-                if let Some(id) = cache.algorithms.get(suffix) {
-                    return storage.algorithms.get(id).cloned();
+                if let Some(data) = cache.algorithms.get(suffix) {
+                    return Some(data.clone());
                 }
 
                 let mut match_data: Option<&LayoutAlgorithmData> = None;
@@ -205,9 +204,7 @@ impl LayoutMetaDataService {
                 }
 
                 let data = match_data?;
-                cache
-                    .algorithms
-                    .insert(suffix.to_string(), data.id().to_string());
+                cache.algorithms.insert(suffix.to_string(), data.clone());
                 Some(data.clone())
             })
         })
@@ -262,8 +259,8 @@ impl LayoutMetaDataService {
         let generation = self.storage.generation();
         self.storage.read(|storage| {
             with_suffix_cache(generation, |cache| {
-                if let Some(id) = cache.options.get(suffix) {
-                    return storage.options.get(id).cloned();
+                if let Some(data) = cache.options.get(suffix) {
+                    return Some(data.clone());
                 }
 
                 let mut match_data: Option<&LayoutOptionData> = None;
@@ -290,9 +287,7 @@ impl LayoutMetaDataService {
                 }
 
                 let data = match_data?;
-                cache
-                    .options
-                    .insert(suffix.to_string(), data.id().to_string());
+                cache.options.insert(suffix.to_string(), data.clone());
                 Some(data.clone())
             })
         })
