@@ -1,6 +1,11 @@
 #[macro_use]
 extern crate napi_derive;
 
+/// Hosts run layouts on several threads of one process (Node.js and Bun workers). The system
+/// allocator serialized their allocations; mimalloc keeps a heap per thread.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use org_eclipse_elk_graph_json::org::eclipse::elk::graph::json::layout_api;
 
 /// Run ELK layout on a JSON graph string.

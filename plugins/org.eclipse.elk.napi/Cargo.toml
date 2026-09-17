@@ -8,6 +8,9 @@ license.workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]
+# Layouts on many threads of one process allocate heavily; glibc malloc serializes them.
+# local_dynamic_tls: the addon is loaded with dlopen, where initial-exec TLS may not fit.
+mimalloc = { version = "0.1", features = ["local_dynamic_tls"] }
 napi = { version = "2", features = ["napi4"] }
 napi-derive = "2"
 org-eclipse-elk-graph-json = { path = "../org.eclipse.elk.graph.json" }
