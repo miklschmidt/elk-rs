@@ -54,7 +54,8 @@ struct LayoutMetaDataStorage {
     options: HashMap<String, LayoutOptionData>,
     legacy_options: HashMap<String, LayoutOptionData>,
     categories: HashMap<String, LayoutCategoryData>,
-    algorithm_suffix_map: HashMap<String, LayoutAlgorithmData>,
+    /// Suffix lookups already resolved, to the id of the algorithm they found.
+    algorithm_suffix_map: HashMap<String, String>,
     option_suffix_map: HashMap<String, LayoutOptionData>,
 }
 
@@ -121,6 +122,8 @@ impl LayoutMetaDataService {
         let mut storage = self.storage.lock();        storage
             .algorithms
             .insert(algorithm.id().to_string(), algorithm);
+        // A new algorithm can make a resolved suffix ambiguous.
+        storage.algorithm_suffix_map.clear();
     }
 
     fn register_layout_option(&self, option: LayoutOptionData) {
@@ -152,8 +155,11 @@ impl LayoutMetaDataService {
             return None;
         }
 
-        let mut storage = self.storage.lock();        if let Some(data) = storage.algorithm_suffix_map.get(suffix) {
-            return Some(data.clone());
+        let mut storage = self.storage.lock();
+        // The cache holds the algorithm's id, not a copy of its data: the data can still change
+        // (its provider pool is overridden after registration) and lookups must see that.
+        if let Some(id) = storage.algorithm_suffix_map.get(suffix) {
+            return storage.algorithms.get(id).cloned();
         }
 
         let mut match_data: Option<LayoutAlgorithmData> = None;
@@ -168,9 +174,8 @@ impl LayoutMetaDataService {
         }
 
         if let Some(data) = match_data.as_ref() {
-            storage
-                .algorithm_suffix_map
-                .insert(suffix.to_string(), data.clone());
+            let id = data.id().to_string();
+            storage.algorithm_suffix_map.insert(suffix.to_string(), id);
         }
 
         match_data

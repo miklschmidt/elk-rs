@@ -1,7 +1,11 @@
 use std::sync::Arc;
 
 use org_eclipse_elk_core::org::eclipse::elk::core::data::{
-    LayoutMetaDataService, LayoutOptionType,
+    ILayoutMetaDataProvider, LayoutAlgorithmData, LayoutMetaDataRegistry, LayoutMetaDataService,
+    LayoutOptionType,
+};
+use org_eclipse_elk_core::org::eclipse::elk::core::util::{
+    AlgorithmFactory, BoxLayoutProvider, InstancePool,
 };
 use org_eclipse_elk_core::org::eclipse::elk::core::math::ElkPadding;
 use org_eclipse_elk_core::org::eclipse::elk::core::options::{
@@ -105,4 +109,38 @@ fn box_packing_mode_option_is_registered_through_core_options() {
         .get_algorithm_data("org.eclipse.elk.box")
         .expect("box algorithm");
     assert!(box_algorithm.knows_option(CoreOptions::BOX_PACKING_MODE.id()));
+}
+
+struct SuffixCacheProvider;
+
+impl ILayoutMetaDataProvider for SuffixCacheProvider {
+    fn apply(&self, registry: &mut dyn LayoutMetaDataRegistry) {
+        registry.register_algorithm(LayoutAlgorithmData::new("test.suffixcache.algorithm"));
+    }
+}
+
+/// A provider pool installed after an algorithm was looked up by suffix is what the next
+/// lookup by that suffix returns. The suffix cache used to keep a copy of the algorithm data
+/// from the first lookup, so an early lookup pinned the pool the algorithm had then: a test
+/// that resolved `layered` before another test installed ELK Layered's provider kept laying
+/// graphs out with the core placeholder, a box layouter.
+#[test]
+fn test_suffix_lookup_sees_a_provider_pool_installed_after_it() {
+    let service = LayoutMetaDataService::get_instance();
+    service.register_layout_meta_data_provider(&SuffixCacheProvider);
+    let before = service
+        .get_algorithm_data_by_suffix("suffixcache.algorithm")
+        .expect("algorithm by suffix");
+    assert!(before.provider_pool().is_none());
+
+    let pool = Arc::new(InstancePool::new(Box::new(AlgorithmFactory::new(|| {
+        Box::new(BoxLayoutProvider::new())
+    }))));
+    service.override_algorithm_provider_pool("test.suffixcache.algorithm", pool.clone());
+
+    let after = service
+        .get_algorithm_data_by_suffix("suffixcache.algorithm")
+        .expect("algorithm by suffix");
+    let installed = after.provider_pool().expect("the installed provider pool");
+    assert!(Arc::ptr_eq(&installed, &pool));
 }
