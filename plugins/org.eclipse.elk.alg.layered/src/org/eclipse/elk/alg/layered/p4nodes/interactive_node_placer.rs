@@ -79,37 +79,70 @@ impl ILayoutPhase<LayeredPhases, LGraph> for InteractiveNodePlacer {
 }
 
 fn place_nodes(sync: &mut ArenaSync, node_ids: &[NodeId], spacings: &Spacings) {
+    let seed = |sync: &ArenaSync, nid: NodeId| -> Option<f64> {
+        sync.arena()
+            .node_properties(nid)
+            .get_property(InternalProperties::ORIGINAL_DUMMY_NODE_POSITION)
+    };
+
+    // Start with the positions the dummies were seeded with. Dummies without a seed follow the
+    // node above them. Only the dummies that are not long edge dummies are pushed down here.
     let mut min_valid_y = f64::NEG_INFINITY;
     let mut prev_node_type = NodeType::Normal;
-
     for &nid in node_ids {
         let node_type = sync.arena().node_type(nid);
         let spacing = spacings.get_vertical_spacing_for_types(node_type, prev_node_type);
-
-        let mut pos_y = sync.arena().node_pos(nid).y;
         if node_type != NodeType::Normal {
-            let original: Option<f64> = sync
-                .arena()
-                .node_properties(nid)
-                .get_property(InternalProperties::ORIGINAL_DUMMY_NODE_POSITION);
-            if let Some(original) = original {
-                pos_y = original;
-            } else {
-                min_valid_y = min_valid_y.max(0.0);
-                pos_y = min_valid_y + spacing;
+            let y = seed(sync, nid).unwrap_or_else(|| min_valid_y.max(0.0) + spacing);
+            sync.arena_mut().node_pos_mut(nid).y = y;
+        }
+        let margin = sync.arena().node_margin(nid).clone();
+        let placed = sync
+            .arena()
+            .node_pos(nid)
+            .y
+            .max(min_valid_y + spacing + margin.top);
+        if node_type != NodeType::Normal && node_type != NodeType::LongEdge {
+            sync.arena_mut().node_pos_mut(nid).y = placed;
+        }
+        min_valid_y = placed + sync.arena().node_size(nid).y + margin.bottom;
+        prev_node_type = node_type;
+    }
+
+    // Use the free space above a node before a dummy pushes that node out of its place.
+    let mut maximum = f64::INFINITY;
+    let mut next_node_type = NodeType::Normal;
+    for &nid in node_ids.iter().rev() {
+        let node_type = sync.arena().node_type(nid);
+        let margin = sync.arena().node_margin(nid).clone();
+        if node_type != NodeType::Normal {
+            let spacing = spacings.get_vertical_spacing_for_types(next_node_type, node_type);
+            let size_y = sync.arena().node_size(nid).y;
+            let pos = sync.arena_mut().node_pos_mut(nid);
+            pos.y = pos.y.min(maximum - spacing - size_y - margin.bottom);
+        }
+        maximum = sync.arena().node_pos(nid).y - margin.top;
+        next_node_type = node_type;
+    }
+
+    // Forward constraints still make room where the gap between nodes is too small.
+    let mut min_valid_y = f64::NEG_INFINITY;
+    let mut prev_node_type = NodeType::Normal;
+    for &nid in node_ids {
+        let node_type = sync.arena().node_type(nid);
+        // A label need not keep a displacement caused by a dummy the backward pass moved.
+        if node_type == NodeType::Label {
+            if let Some(seed) = seed(sync, nid) {
+                let pos = sync.arena_mut().node_pos_mut(nid);
+                pos.y = pos.y.min(seed);
             }
         }
-
-        let margin_top = sync.arena().node_margin(nid).top;
-        let margin_bottom = sync.arena().node_margin(nid).bottom;
+        let spacing = spacings.get_vertical_spacing_for_types(node_type, prev_node_type);
+        let margin = sync.arena().node_margin(nid).clone();
         let size_y = sync.arena().node_size(nid).y;
-
-        if pos_y < min_valid_y + spacing + margin_top {
-            pos_y = min_valid_y + spacing + margin_top;
-        }
-
-        sync.arena_mut().node_pos_mut(nid).y = pos_y;
-        min_valid_y = pos_y + size_y + margin_bottom;
+        let pos = sync.arena_mut().node_pos_mut(nid);
+        pos.y = pos.y.max(min_valid_y + spacing + margin.top);
+        min_valid_y = pos.y + size_y + margin.bottom;
         prev_node_type = node_type;
     }
 }

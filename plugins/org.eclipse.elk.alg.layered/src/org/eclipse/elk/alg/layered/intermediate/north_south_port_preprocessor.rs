@@ -5,7 +5,7 @@ use org_eclipse_elk_core::org::eclipse::elk::core::util::IElkProgressMonitor;
 use org_eclipse_elk_core::org::eclipse::elk::core::util::elk_trace::ElkTrace;
 
 use crate::org::eclipse::elk::alg::layered::graph::{
-    LGraph, LGraphUtil, LNode, LNodeRef, LPort, LPortRef, NodeType,
+    LEdgeRef, LGraph, LGraphUtil, LNode, LNodeRef, LPort, LPortRef, NodeType,
 };
 use crate::org::eclipse::elk::alg::layered::options::internal_properties::Origin;
 use crate::org::eclipse::elk::alg::layered::options::{
@@ -424,6 +424,8 @@ fn create_dummy_node(
     dummy_nodes: &mut Vec<LNodeRef>,
 ) -> LNodeRef {
     let dummy = LNode::new(graph);
+    // The edges handed over last: an in-out port's outgoing edges, else the incoming ones.
+    let mut edge_array: Vec<LEdgeRef> = Vec::new();
     {
         let mut dummy_guard = dummy.lock();
         dummy_guard.set_node_type(NodeType::NorthSouthPort);
@@ -449,12 +451,13 @@ fn create_dummy_node(
             let port_guard = in_port.lock();
             LGraphUtil::to_edge_array(port_guard.incoming_edges())
         };
-        for edge in edges {
+        for edge in &edges {
             crate::org::eclipse::elk::alg::layered::graph::LEdge::set_target(
-                &edge,
+                edge,
                 Some(dummy_input_port.clone()),
             );
         }
+        edge_array = edges;
 
         {
             let mut port_guard = in_port.lock();
@@ -484,12 +487,13 @@ fn create_dummy_node(
             let port_guard = out_port.lock();
             LGraphUtil::to_edge_array(port_guard.outgoing_edges())
         };
-        for edge in edges {
+        for edge in &edges {
             crate::org::eclipse::elk::alg::layered::graph::LEdge::set_source(
-                &edge,
+                edge,
                 Some(dummy_output_port.clone()),
             );
         }
+        edge_array = edges;
 
         {
             let mut port_guard = out_port.lock();
@@ -500,6 +504,35 @@ fn create_dummy_node(
                     dummy_guard.set_property(InternalProperties::ORIGIN, Some(Origin::LNode(node)));
                 }
             }
+        }
+    }
+
+    // Keep endpoint detour dummies in the corridor their edges' prior routes ran in: the
+    // outermost prior bend point, above the node for a NORTH port and below it otherwise.
+    if let Some(original_port) = in_port.or(out_port) {
+        let north = original_port.lock().side() == PortSide::North;
+        let mut prior_position = if north {
+            f64::INFINITY
+        } else {
+            f64::NEG_INFINITY
+        };
+        for edge in &edge_array {
+            let prior_route = edge
+                .lock()
+                .get_property(InternalProperties::ORIGINAL_BENDPOINTS);
+            for point in prior_route.iter().flat_map(|route| route.iter()) {
+                prior_position = if north {
+                    prior_position.min(point.y)
+                } else {
+                    prior_position.max(point.y)
+                };
+            }
+        }
+        if prior_position.is_finite() {
+            dummy.lock().set_property(
+                InternalProperties::ORIGINAL_DUMMY_NODE_POSITION,
+                Some(prior_position),
+            );
         }
     }
 

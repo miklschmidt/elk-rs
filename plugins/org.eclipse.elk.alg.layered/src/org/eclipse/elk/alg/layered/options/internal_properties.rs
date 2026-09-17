@@ -5,6 +5,7 @@ use org_eclipse_elk_graph::org::eclipse::elk::graph::util::elk_mutex::Mutex;
 use org_eclipse_elk_alg_common::org::eclipse::elk::alg::common::nodespacing::LabelCell;
 use org_eclipse_elk_core::org::eclipse::elk::core::alg::SharedProcessor;
 use org_eclipse_elk_core::org::eclipse::elk::core::math::kvector::KVector;
+use org_eclipse_elk_core::org::eclipse::elk::core::math::kvector_chain::KVectorChain;
 use org_eclipse_elk_core::org::eclipse::elk::core::options::label_side::LabelSide;
 use org_eclipse_elk_core::org::eclipse::elk::core::options::port_constraints::PortConstraints;
 use org_eclipse_elk_core::org::eclipse::elk::core::options::port_side::PortSide;
@@ -174,6 +175,9 @@ pub static PORT_RATIO_OR_POSITION_PROPERTY: LazyLock<Property<f64>> =
 pub static MODEL_ORDER_PROPERTY: LazyLock<Property<i32>> =
     LazyLock::new(|| Property::new("modelOrder"));
 
+pub static ORIGINAL_BENDPOINTS_PROPERTY: LazyLock<Property<KVectorChain>> =
+    LazyLock::new(|| Property::new("originalBendpoints"));
+
 pub static ORIGINAL_DUMMY_NODE_POSITION_PROPERTY: LazyLock<Property<f64>> =
     LazyLock::new(|| Property::new("originalDummyNodePosition"));
 
@@ -326,6 +330,9 @@ impl InternalProperties {
     pub const PORT_RATIO_OR_POSITION: &'static LazyLock<Property<f64>> =
         &PORT_RATIO_OR_POSITION_PROPERTY;
     pub const MODEL_ORDER: &'static LazyLock<Property<i32>> = &MODEL_ORDER_PROPERTY;
+    /// The original bend points of an edge, in the coordinates of the graph it is laid out in.
+    pub const ORIGINAL_BENDPOINTS: &'static LazyLock<Property<KVectorChain>> =
+        &ORIGINAL_BENDPOINTS_PROPERTY;
     pub const ORIGINAL_DUMMY_NODE_POSITION: &'static LazyLock<Property<f64>> =
         &ORIGINAL_DUMMY_NODE_POSITION_PROPERTY;
     pub const PORT_DUMMY: &'static LazyLock<Property<LNodeRef>> = &PORT_DUMMY_PROPERTY;

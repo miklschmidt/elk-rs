@@ -10,7 +10,9 @@ use crate::org::eclipse::elk::alg::layered::graph::{
     LEdgeRef, LGraph, LLabelRef, LNode, LNodeRef, NodeType,
 };
 use crate::org::eclipse::elk::alg::layered::intermediate::LongEdgeSplitter;
-use crate::org::eclipse::elk::alg::layered::options::{InternalProperties, LayeredOptions, Origin};
+use crate::org::eclipse::elk::alg::layered::options::{
+    InternalProperties, LayeredOptions, NodePlacementStrategy, Origin,
+};
 
 pub struct LabelDummyInserter;
 
@@ -27,6 +29,12 @@ impl ILayoutProcessor<LGraph> for LabelDummyInserter {
         let layout_direction = layered_graph
             .get_property(LayeredOptions::DIRECTION)
             .unwrap_or(Direction::Right);
+        // Interactive placement keeps an explicitly positioned inline label where it was;
+        // without the seed its dummy would start at the graph origin.
+        let seed_from_labels = layered_graph
+            .get_property(LayeredOptions::NODE_PLACEMENT_STRATEGY)
+            .unwrap_or_default()
+            == NodePlacementStrategy::Interactive;
 
         let nodes = layered_graph.layerless_nodes().clone();
         let mut new_dummy_nodes = Vec::new();
@@ -48,7 +56,7 @@ impl ILayoutProcessor<LGraph> for LabelDummyInserter {
                 let dummy_node = create_label_dummy(&graph, &edge, thickness);
                 new_dummy_nodes.push(dummy_node.clone());
 
-                let (represented_labels, dummy_size) = collect_center_labels_and_size(
+                let (represented_labels, dummy_size, seed) = collect_center_labels_and_size(
                     &edge,
                     layout_direction,
                     thickness,
@@ -58,6 +66,13 @@ impl ILayoutProcessor<LGraph> for LabelDummyInserter {
 
                 {
                     let mut dummy_guard = dummy_node.lock();
+                    if let Some(seed) = seed.filter(|_| seed_from_labels) {
+                        *dummy_guard.shape().position() = seed;
+                        dummy_guard.set_property(
+                            InternalProperties::ORIGINAL_DUMMY_NODE_POSITION,
+                            Some(seed.y),
+                        );
+                    }
                     let size = dummy_guard.shape().size();
                     size.x = dummy_size.x;
                     size.y = dummy_size.y;
@@ -171,25 +186,31 @@ fn collect_center_labels_and_size(
     thickness: f64,
     edge_label_spacing: f64,
     label_label_spacing: f64,
-) -> (Vec<LLabelRef>, KVector) {
+) -> (Vec<LLabelRef>, KVector, Option<KVector>) {
     let labels = edge
         .lock().labels().clone();
 
     let mut represented_labels = Vec::new();
     let mut remaining_labels = Vec::new();
     let mut dummy_size = KVector::with_values(0.0, thickness);
+    // The position of the last represented label that has one.
+    let mut seed = None;
 
     for label in labels {
-        let (placement, label_size) = {
+        let (placement, label_size, label_position) = {
             let mut label_guard = label.lock();
             let placement = label_guard
                 .get_property(LayeredOptions::EDGE_LABELS_PLACEMENT)
                 .unwrap_or(EdgeLabelPlacement::Center);
             let size = *label_guard.shape().size_ref();
-            (placement, size)
+            let position = *label_guard.shape().position_ref();
+            (placement, size, position)
         };
 
         if placement == EdgeLabelPlacement::Center {
+            if label_position.x != 0.0 || label_position.y != 0.0 {
+                seed = Some(label_position);
+            }
             if layout_direction.is_vertical() {
                 dummy_size.x += label_size.x + label_label_spacing;
                 dummy_size.y = dummy_size.y.max(label_size.y);
@@ -217,5 +238,5 @@ fn collect_center_labels_and_size(
         *edge_guard.labels_mut() = remaining_labels;
     }
 
-    (represented_labels, dummy_size)
+    (represented_labels, dummy_size, seed)
 }

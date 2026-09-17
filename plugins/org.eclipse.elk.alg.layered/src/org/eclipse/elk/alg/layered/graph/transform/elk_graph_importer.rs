@@ -5,6 +5,7 @@ use org_eclipse_elk_graph::org::eclipse::elk::graph::util::elk_mutex::Mutex;
 
 use org_eclipse_elk_alg_common::org::eclipse::elk::alg::common::nodespacing::NodeLabelAndSizeCalculator;
 use org_eclipse_elk_core::org::eclipse::elk::core::math::KVector;
+use org_eclipse_elk_core::org::eclipse::elk::core::math::kvector_chain::KVectorChain;
 use org_eclipse_elk_core::org::eclipse::elk::core::options::core_options::CoreOptions;
 use org_eclipse_elk_core::org::eclipse::elk::core::options::direction::Direction;
 use org_eclipse_elk_core::org::eclipse::elk::core::options::edge_label_placement::EdgeLabelPlacement;
@@ -30,9 +31,20 @@ use crate::org::eclipse::elk::alg::layered::graph::{
     LEdge, LGraph, LGraphRef, LGraphUtil, LLabel, LLabelRef, LNode, LNodeRef, LPort, LPortRef,
 };
 use crate::org::eclipse::elk::alg::layered::options::{
-    CycleBreakingStrategy, GraphProperties, InternalProperties, LayeredOptions, LayeringStrategy,
-    NodePromotionStrategy, OrderingStrategy, Origin, OriginId, PortType,
+    CrossingMinimizationStrategy, CycleBreakingStrategy, GraphProperties, InternalProperties, LayeredOptions, LayeringStrategy,
+    NodePlacementStrategy, NodePromotionStrategy, OrderingStrategy, Origin, OriginId, PortType,
 };
+
+/// Which end of an edge a port is resolved for, with where the edge's section puts that end.
+enum EdgeEnd {
+    Source {
+        section_point: Option<KVector>,
+        target_is_descendant: bool,
+    },
+    Target {
+        section_point: Option<KVector>,
+    },
+}
 
 pub struct ElkGraphImporter<'a> {
     origin_store: &'a mut OriginStore,
@@ -430,7 +442,7 @@ impl<'a> ElkGraphImporter<'a> {
                 );
             }
 
-            self.transform_edge(&edge, &parent_lgraph);
+            self.transform_edge(&edge, &parent_elk_graph, &parent_lgraph);
         }
 
         let parent_graph = {
@@ -471,7 +483,7 @@ impl<'a> ElkGraphImporter<'a> {
                     .graph_property(&source_node, CoreOptions::INSIDE_SELF_LOOPS_ACTIVATE)
                     .unwrap_or(false);
                 if inside_self_loops_enabled && inside_self_loop_yo {
-                    self.transform_edge(&edge, lgraph);
+                    self.transform_edge(&edge, elkgraph, lgraph);
                 }
             }
         }
@@ -905,7 +917,7 @@ impl<'a> ElkGraphImporter<'a> {
         Some(lport)
     }
 
-    fn transform_edge(&mut self, elkedge: &ElkEdgeRef, lgraph: &LGraphRef) {
+    fn transform_edge(&mut self, elkedge: &ElkEdgeRef, elkparent: &ElkNodeRef, lgraph: &LGraphRef) {
         let (sources, targets, properties, labels, edge_id) = {
             let mut edge_mut = elkedge.borrow_mut();
             let sources: Vec<ElkConnectableShapeRef> =
@@ -930,7 +942,41 @@ impl<'a> ElkGraphImporter<'a> {
             return;
         };
 
-        let source_port = match self.resolve_port(source_shape, PortType::Output, lgraph) {
+        let (edge_section, containing_node) = {
+            let mut edge_mut = elkedge.borrow_mut();
+            (edge_mut.sections().get(0), edge_mut.containing_node())
+        };
+        // Edge sections are relative to the edge's containing node; the ports created for them
+        // and the original bend points belong to the graph the edge is laid out in.
+        let to_parent = |point: KVector| {
+            let point = ElkUtil::to_absolute(point, containing_node.clone());
+            ElkUtil::to_relative(point, Some(elkparent.clone()))
+        };
+        let (source_point, target_point) = match &edge_section {
+            Some(section) => {
+                let section = section.borrow();
+                (
+                    Some(to_parent(KVector::with_values(section.start_x(), section.start_y()))),
+                    Some(to_parent(KVector::with_values(section.end_x(), section.end_y()))),
+                )
+            }
+            None => (None, None),
+        };
+        let target_is_descendant_of_source = match (
+            ElkGraphUtil::connectable_shape_to_node(source_shape),
+            ElkGraphUtil::connectable_shape_to_node(target_shape),
+        ) {
+            (Some(source_node), Some(target_node)) => {
+                ElkGraphUtil::is_descendant(&target_node, &source_node)
+            }
+            _ => false,
+        };
+
+        let source_end = EdgeEnd::Source {
+            section_point: source_point,
+            target_is_descendant: target_is_descendant_of_source,
+        };
+        let source_port = match self.resolve_port(source_shape, source_end, lgraph) {
             Some(port) => port,
             None => {
                 // Cross-hierarchy edge: source not in current layout scope.
@@ -938,7 +984,10 @@ impl<'a> ElkGraphImporter<'a> {
                 return;
             }
         };
-        let target_port = match self.resolve_port(target_shape, PortType::Input, lgraph) {
+        let target_end = EdgeEnd::Target {
+            section_point: target_point,
+        };
+        let target_port = match self.resolve_port(target_shape, target_end, lgraph) {
             Some(port) => port,
             None => {
                 // Cross-hierarchy edge: target not in current layout scope.
@@ -1094,6 +1143,32 @@ impl<'a> ElkGraphImporter<'a> {
             }
         };
 
+        // Copy the original bend points of the edge in case they are required
+        let bend_points_required = {
+            let graph_guard = lgraph.lock();
+            graph_guard
+                .get_property(LayeredOptions::CROSSING_MINIMIZATION_STRATEGY)
+                .unwrap_or_default()
+                == CrossingMinimizationStrategy::Interactive
+                || graph_guard
+                    .get_property(LayeredOptions::NODE_PLACEMENT_STRATEGY)
+                    .unwrap_or_default()
+                    == NodePlacementStrategy::Interactive
+        };
+        if let Some(section) = edge_section.filter(|_| bend_points_required) {
+            let has_bend_points = !section.borrow_mut().bend_points().is_empty();
+            if has_bend_points {
+                let mut imported_bendpoints = KVectorChain::new();
+                for point in ElkUtil::create_vector_chain(&section).iter() {
+                    imported_bendpoints.add_vector(to_parent(*point));
+                }
+                ledge.lock().set_property(
+                    InternalProperties::ORIGINAL_BENDPOINTS,
+                    Some(imported_bendpoints),
+                );
+            }
+        }
+
         {
             let mut graph_guard = lgraph.lock();
             graph_guard.set_property(InternalProperties::GRAPH_PROPERTIES, Some(graph_properties));
@@ -1208,7 +1283,7 @@ impl<'a> ElkGraphImporter<'a> {
     fn resolve_port(
         &mut self,
         shape: &ElkConnectableShapeRef,
-        port_type: PortType,
+        end: EdgeEnd,
         lgraph: &LGraphRef,
     ) -> Option<LPortRef> {
         match shape {
@@ -1287,23 +1362,43 @@ impl<'a> ElkGraphImporter<'a> {
             }
             ElkConnectableShapeRef::Node(node) => {
                 let lnode = self.node_for(node)?;
-                // Java parity:
-                // - source endpoint creation uses the current edge-containing graph (`lgraph`)
-                // - target endpoint creation uses `targetLNode.getGraph()`
-                // Here, `transform_edge` always resolves target with `PortType::Input`.
-                let graph_for_port = if port_type == PortType::Input {
-                    lnode
-                        .lock().graph()
-                        .unwrap_or_else(|| lgraph.clone())
-                } else {
-                    lgraph.clone()
-                };
-                Some(LGraphUtil::create_port(
-                    &lnode,
-                    None,
-                    port_type,
-                    &graph_for_port,
-                ))
+                // Java parity: a port created for an edge end sits where the edge's section
+                // starts or ends if the node fixes its port sides.
+                let side_fixed = lnode
+                    .lock()
+                    .get_property(LayeredOptions::PORT_CONSTRAINTS)
+                    .unwrap_or(PortConstraints::Undefined)
+                    .is_side_fixed();
+                match end {
+                    // The source port is created in the current edge-containing graph (`lgraph`).
+                    EdgeEnd::Source {
+                        section_point,
+                        target_is_descendant,
+                    } => {
+                        let mut port_type = PortType::Output;
+                        let mut point = section_point.filter(|_| side_fixed);
+                        if let Some(point) = point.as_mut() {
+                            // A hierarchical edge's source port is external: put it on the
+                            // west side.
+                            if target_is_descendant {
+                                port_type = PortType::Input;
+                                point.add(lnode.lock().shape().position_ref());
+                            }
+                        }
+                        Some(LGraphUtil::create_port(&lnode, point, port_type, lgraph))
+                    }
+                    // The target port is created in `targetLNode.getGraph()`.
+                    EdgeEnd::Target { section_point } => {
+                        let graph_for_port =
+                            lnode.lock().graph().unwrap_or_else(|| lgraph.clone());
+                        Some(LGraphUtil::create_port(
+                            &lnode,
+                            section_point.filter(|_| side_fixed),
+                            PortType::Input,
+                            &graph_for_port,
+                        ))
+                    }
+                }
             }
         }
     }

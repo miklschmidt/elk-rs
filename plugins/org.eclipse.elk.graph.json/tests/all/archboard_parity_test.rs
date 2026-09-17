@@ -121,3 +121,19 @@ fn interactive_layout_with_external_ports_returns() {
     assert_parity("frame", &["ryy99v", "fiebzn"]);
     assert_parity("nested", &["fmkzhl", "5lpmaz"]);
 }
+
+/// Interactive layouts that route edges against the bend points of a previous layout: the
+/// original bend points are imported relative to the graph the edge is laid out in, follow
+/// the graph through mirroring and transposing, seed the crossing minimizer and the positions
+/// of north/south port and label dummies, and interactive node placement keeps seeded dummies
+/// in place where there is room.
+#[test]
+fn interactive_layout_routes_along_previous_bend_points() {
+    assert_parity(
+        "routing",
+        &[
+            "nkv1gs", "c4u6nd", "96osdb", "al95yd", "ifjter", "3wer2e", "r970w2", "ah7nlf",
+            "a8hfgw", "13pp0b",
+        ],
+    );
+}

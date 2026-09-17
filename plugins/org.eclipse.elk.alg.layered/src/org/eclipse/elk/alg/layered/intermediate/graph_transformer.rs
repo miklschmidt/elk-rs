@@ -311,6 +311,14 @@ impl GraphTransformer {
             for bend_point in edge_guard.bend_points().iter_mut() {
                 mirror_vector_x(bend_point, offset);
             }
+            if let Some(mut prior_points) =
+                edge_guard.get_property(InternalProperties::ORIGINAL_BENDPOINTS)
+            {
+                for point in prior_points.iter_mut() {
+                    mirror_vector_x(point, offset);
+                }
+                edge_guard.set_property(InternalProperties::ORIGINAL_BENDPOINTS, Some(prior_points));
+            }
 
             let has_junction_points = edge_guard
                 .graph_element()
@@ -342,6 +350,14 @@ impl GraphTransformer {
 
             for bend_point in edge_guard.bend_points().iter_mut() {
                 mirror_vector_y(bend_point, offset);
+            }
+            if let Some(mut prior_points) =
+                edge_guard.get_property(InternalProperties::ORIGINAL_BENDPOINTS)
+            {
+                for point in prior_points.iter_mut() {
+                    mirror_vector_y(point, offset);
+                }
+                edge_guard.set_property(InternalProperties::ORIGINAL_BENDPOINTS, Some(prior_points));
             }
 
             let has_junction_points = edge_guard
@@ -471,6 +487,14 @@ impl GraphTransformer {
 
             for bend_point in edge_guard.bend_points().iter_mut() {
                 transpose_vector(bend_point);
+            }
+            if let Some(mut prior_points) =
+                edge_guard.get_property(InternalProperties::ORIGINAL_BENDPOINTS)
+            {
+                for point in prior_points.iter_mut() {
+                    transpose_vector(point);
+                }
+                edge_guard.set_property(InternalProperties::ORIGINAL_BENDPOINTS, Some(prior_points));
             }
 
             let has_junction_points = edge_guard

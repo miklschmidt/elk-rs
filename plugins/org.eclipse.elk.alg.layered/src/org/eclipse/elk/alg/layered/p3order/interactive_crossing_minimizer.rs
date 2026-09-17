@@ -77,7 +77,7 @@ impl InteractiveCrossingMinimizer {
             .copied()
             .unwrap_or(0.0);
 
-        let compare = pos1.partial_cmp(&pos2).unwrap_or(Ordering::Equal);
+        let compare = java_double_compare(pos1, pos2);
         if compare != Ordering::Equal {
             return compare;
         }
@@ -137,16 +137,22 @@ impl InteractiveCrossingMinimizer {
                 })
         }?;
 
-        let mut bend_points = edge
-            .lock().bend_points_ref().clone();
-        let reversed = {
+        // Reconstruct the original bend points from the edge's annotations. They are a copy: the
+        // edge keeps its original bend points for every other dummy of it.
+        let (original_bendpoints, reversed) = {
             let edge_guard = edge.lock();
-            edge_guard.get_property(InternalProperties::REVERSED)
-                .unwrap_or(false)
+            (
+                edge_guard.get_property(InternalProperties::ORIGINAL_BENDPOINTS),
+                edge_guard
+                    .get_property(InternalProperties::REVERSED)
+                    .unwrap_or(false),
+            )
         };
-        if reversed {
-            bend_points = KVectorChain::reverse(&bend_points);
-        }
+        let mut bend_points = match original_bendpoints {
+            None => KVectorChain::new(),
+            Some(points) if reversed => KVectorChain::reverse(&points),
+            Some(points) => points,
+        };
 
         let source = {
             let node_guard = node.lock();
@@ -191,19 +197,22 @@ impl InteractiveCrossingMinimizer {
             point2 = *point;
         }
 
-        let delta_x = point2.x - point1.x;
-        if delta_x.abs() <= f64::EPSILON {
-            return Some(point2.y);
-        }
-
-        Some(point1.y + (horiz_pos - point1.x) / delta_x * (point2.y - point1.y))
+        Some(point1.y + (horiz_pos - point1.x) / (point2.x - point1.x) * (point2.y - point1.y))
     }
 
     fn north_south_port_position(node: &LNodeRef) -> Option<f64> {
-        let dummy_port = {
+        // A dummy whose edges carry prior routes stays in the corridor they ran in.
+        let (seeded_position, dummy_port) = {
             let node_guard = node.lock();
-            node_guard.ports().first().cloned()
-        }?;
+            (
+                node_guard.get_property(InternalProperties::ORIGINAL_DUMMY_NODE_POSITION),
+                node_guard.ports().first().cloned(),
+            )
+        };
+        if seeded_position.is_some() {
+            return seeded_position;
+        }
+        let dummy_port = dummy_port?;
         let origin_port = {
             let dummy_port_guard = dummy_port.lock();
             dummy_port_guard.get_property(InternalProperties::ORIGIN)
@@ -231,6 +240,21 @@ impl InteractiveCrossingMinimizer {
             _ => None,
         }
     }
+}
+
+/// `Double.compare`: `-0.0` sorts before `0.0`, and NaN after every other value.
+fn java_double_compare(a: f64, b: f64) -> Ordering {
+    if a < b {
+        return Ordering::Less;
+    }
+    if a > b {
+        return Ordering::Greater;
+    }
+    let bits = |value: f64| {
+        let value = if value.is_nan() { f64::NAN } else { value };
+        value.to_bits() as i64
+    };
+    bits(a).cmp(&bits(b))
 }
 
 impl Default for InteractiveCrossingMinimizer {
