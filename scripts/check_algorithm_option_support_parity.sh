@@ -1,6 +1,12 @@
 #!/usr/bin/env sh
 set -eu
 
+# The file searches below need ripgrep; without it they find nothing and the report is wrong.
+if ! command -v rg >/dev/null 2>&1; then
+  echo "$0: ripgrep (rg) is required" >&2
+  exit 1
+fi
+
 JAVA_SOURCES_ROOT="${JAVA_SOURCES_ROOT:-external/elk/plugins}"
 RUST_SOURCES_ROOT="${RUST_SOURCES_ROOT:-plugins}"
 RUST_CORE_DATA_FILE="${RUST_CORE_DATA_FILE:-$RUST_SOURCES_ROOT/org.eclipse.elk.core/src/org/eclipse/elk/core/data/mod.rs}"
@@ -80,7 +86,7 @@ printf '%s\n' "$IGNORE_IDS" | tr ',' '\n' | awk 'NF > 0 { gsub(/^[[:space:]]+|[[
     done | sort > "$java_support_algos_file"
 
 # Rust (provider): collect algorithm ids from add_option_support(<algo>, ...).
-(rg --files "$RUST_SOURCES_ROOT" -g '*meta_data_provider.rs' || true) \
+(rg --files "$RUST_SOURCES_ROOT" -g '*meta_data_provider.rs' -g '!**/tests/**' || true) \
     | while IFS= read -r file; do
         [ -f "$file" ] || continue
         awk -v map_file="$rust_algo_map_file" '
@@ -201,6 +207,15 @@ if [ -f "$RUST_CORE_DATA_FILE" ]; then
             }
             return ""
         }
+        # rustfmt breaks a long "let data =" before its value; read the two lines as one.
+        pending_let != "" {
+            $0 = pending_let " " $0
+            pending_let = ""
+        }
+        /let[[:space:]]+(mut[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*$/ {
+            pending_let = $0
+            next
+        }
         /let[[:space:]]+mut[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*LayoutAlgorithmData::new\(/ {
             var_name = $0
             sub(/^.*let[[:space:]]+mut[[:space:]]+/, "", var_name)
@@ -215,6 +230,20 @@ if [ -f "$RUST_CORE_DATA_FILE" ]; then
             if (algo_id != "") {
                 algorithm_by_var[var_name] = algo_id
             }
+        }
+        # rustfmt also breaks "data" and ".add_known_option_default(" onto two lines.
+        /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*[[:space:]]*$/ {
+            receiver = $0
+            gsub(/[[:space:]]/, "", receiver)
+            next
+        }
+        receiver != "" {
+            if ($0 ~ /^[[:space:]]*\.add_known_option_default[[:space:]]*\(/) {
+                call = $0
+                sub(/^[[:space:]]*/, "", call)
+                $0 = receiver call
+            }
+            receiver = ""
         }
         /[A-Za-z_][A-Za-z0-9_]*\.add_known_option_default[[:space:]]*\(/ {
             var_name = $0

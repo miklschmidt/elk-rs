@@ -1,6 +1,12 @@
 #!/usr/bin/env sh
 set -eu
 
+# The file searches below need ripgrep; without it they find nothing and the report is wrong.
+if ! command -v rg >/dev/null 2>&1; then
+  echo "$0: ripgrep (rg) is required" >&2
+  exit 1
+fi
+
 JAVA_SOURCES_ROOT="${JAVA_SOURCES_ROOT:-external/elk/plugins}"
 RUST_SOURCES_ROOT="${RUST_SOURCES_ROOT:-plugins}"
 REPORT_FILE="${1:-tests/algorithm_name_parity.md}"
@@ -92,7 +98,7 @@ mismatch_file="$tmp_dir/name_mismatches.tsv"
     done | sort -u > "$rust_map_file"
 
 # Rust: id -> name from LayoutAlgorithmData::new + set_name + register_* calls.
-(rg --files "$RUST_SOURCES_ROOT" -g '*.rs' || true) \
+(rg --files "$RUST_SOURCES_ROOT" -g '*.rs' -g '!**/tests/**' || true) \
     | while IFS= read -r file; do
         [ -f "$file" ] || continue
         awk -v map_file="$rust_map_file" '
@@ -147,6 +153,15 @@ mismatch_file="$tmp_dir/name_mismatches.tsv"
                 printed[var] = 1
             }
 
+            # rustfmt breaks a long "let data =" before its value; read the two lines as one.
+            pending_let != "" {
+                $0 = pending_let " " $0
+                pending_let = ""
+            }
+            /let[[:space:]]+(mut[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*$/ {
+                pending_let = $0
+                next
+            }
             /let[[:space:]]+(mut[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=[[:space:]]*LayoutAlgorithmData::new\(/ {
                 line = $0
                 sub(/^.*let[[:space:]]+(mut[[:space:]]+)?/, "", line)

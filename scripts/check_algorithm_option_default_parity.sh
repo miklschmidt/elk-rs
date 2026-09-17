@@ -1,6 +1,12 @@
 #!/usr/bin/env sh
 set -eu
 
+# The file searches below need ripgrep; without it they find nothing and the report is wrong.
+if ! command -v rg >/dev/null 2>&1; then
+  echo "$0: ripgrep (rg) is required" >&2
+  exit 1
+fi
+
 JAVA_SOURCES_ROOT="${JAVA_SOURCES_ROOT:-external/elk/plugins}"
 RUST_SOURCES_ROOT="${RUST_SOURCES_ROOT:-plugins}"
 RUST_CORE_DATA_FILE="${RUST_CORE_DATA_FILE:-$RUST_SOURCES_ROOT/org.eclipse.elk.core/src/org/eclipse/elk/core/data/mod.rs}"

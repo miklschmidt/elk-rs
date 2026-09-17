@@ -1,6 +1,12 @@
 #!/usr/bin/env sh
 set -eu
 
+# The file searches below need ripgrep; without it they find nothing and the report is wrong.
+if ! command -v rg >/dev/null 2>&1; then
+  echo "$0: ripgrep (rg) is required" >&2
+  exit 1
+fi
+
 JAVA_ISSUE_TEST_ROOT="${JAVA_ISSUE_TEST_ROOT:-external/elk/test/org.eclipse.elk.alg.layered.test/src/org/eclipse/elk/alg/layered/issues}"
 RUST_ISSUE_TEST_ROOT="${RUST_ISSUE_TEST_ROOT:-plugins/org.eclipse.elk.alg.layered/tests}"
 REPORT_FILE="${1:-tests/layered_issue_test_parity.md}"

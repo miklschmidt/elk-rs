@@ -1,6 +1,12 @@
 #!/usr/bin/env sh
 set -eu
 
+# The file searches below need ripgrep; without it they find nothing and the report is wrong.
+if ! command -v rg >/dev/null 2>&1; then
+  echo "$0: ripgrep (rg) is required" >&2
+  exit 1
+fi
+
 JAVA_TEST_ROOT="${JAVA_TEST_ROOT:-external/elk/test}"
 RUST_PLUGIN_ROOT="${RUST_PLUGIN_ROOT:-plugins}"
 REPORT_FILE="${1:-tests/java_test_module_parity.md}"

@@ -35,18 +35,18 @@ if [ "$java_candidate_exists" = "yes" ] && [ "$java_baseline_exists" = "yes" ]; 
 fi
 candidate_check_status="unknown"
 if [ "$java_candidate_check_report_exists" = "yes" ]; then
-  if rg -n "^- status: ready$" "$JAVA_BASELINE_CANDIDATE_CHECK_REPORT" >/dev/null 2>&1; then
+  if grep -Eq "^- status: ready$" "$JAVA_BASELINE_CANDIDATE_CHECK_REPORT" 2>/dev/null; then
     candidate_check_status="ready"
-  elif rg -n "^- status: not_ready$" "$JAVA_BASELINE_CANDIDATE_CHECK_REPORT" >/dev/null 2>&1; then
+  elif grep -Eq "^- status: not_ready$" "$JAVA_BASELINE_CANDIDATE_CHECK_REPORT" 2>/dev/null; then
     candidate_check_status="not_ready"
-  elif rg -n "^- status: skipped$" "$JAVA_BASELINE_CANDIDATE_CHECK_REPORT" >/dev/null 2>&1; then
+  elif grep -Eq "^- status: skipped$" "$JAVA_BASELINE_CANDIDATE_CHECK_REPORT" 2>/dev/null; then
     candidate_check_status="skipped"
   fi
 fi
 
 results_skip_reason="none"
 if [ "$results_report_exists" = "yes" ]; then
-  if rg -n "dry-run mode is enabled|generation failed and allowed to continue|skipped because no Java CSV" "$RESULTS_REPORT" >/dev/null 2>&1; then
+  if grep -Eq "dry-run mode is enabled|generation failed and allowed to continue|skipped because no Java CSV" "$RESULTS_REPORT" 2>/dev/null; then
     results_skip_reason="results compare skipped"
   fi
 fi

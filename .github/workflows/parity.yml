@@ -76,6 +76,9 @@ jobs:
       # The Java side builds and runs ELK from external/elk; the metadata checks read its sources.
       - name: Check out ELK
         run: git submodule update --init --depth 1 external/elk
+      # The metadata checks search the Java and Rust sources with ripgrep, which the runner lacks.
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends ripgrep
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
