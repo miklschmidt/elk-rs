@@ -111,6 +111,26 @@ const elk = new ELK({ workerFactory: () => new ElkWorker() });
 A layout that fails rejects with an `Error` carrying ELK's message, and the
 worker replaces its WASM instance before the next layout.
 
+A pool of workers can share one compiled module instead of each compiling the
+5.5 MB binary: compile it once on the page and send it to each worker as its
+first message. A worker that receives no module compiles its own when its
+first layout arrives.
+
+```js
+import ELK from '@archboard/elk-rs/js/elk-api.js';
+import ElkWorker from '@archboard/elk-rs/worker.browser?worker';
+import wasmUrl from '@archboard/elk-rs/wasm-url';
+
+const module = await WebAssembly.compileStreaming(fetch(wasmUrl));
+const createElk = () => new ELK({
+  workerFactory: () => {
+    const worker = new ElkWorker();
+    worker.postMessage({ cmd: 'init', module });
+    return worker;
+  },
+});
+```
+
 
 ## API
 

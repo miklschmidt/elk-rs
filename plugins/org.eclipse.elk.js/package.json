@@ -24,6 +24,10 @@
       "types": "./typings/worker.browser.d.ts",
       "default": "./js/worker.browser.mjs"
     },
+    "./wasm-url": {
+      "types": "./typings/wasm-url.d.ts",
+      "default": "./js/wasm-url.mjs"
+    },
     "./wasm": {
       "types": "./dist/wasm/org_eclipse_elk_wasm.d.ts",
       "default": "./dist/wasm/org_eclipse_elk_wasm.js"

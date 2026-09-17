@@ -6,7 +6,7 @@
 // browsers that needs nothing from Node.js.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -50,7 +50,14 @@ describe('type declarations', () => {
       import { Worker as InProcessWorker } from '${pkg.name}/js/elk-worker.js';
       import type { ElkExtendedEdge } from '${pkg.name}/typings/elk-api.js';
       import initWasm, { layout_json } from '${pkg.name}/wasm';
-      import '${pkg.name}/worker.browser';
+      import type { ElkWorkerInitMessage } from '${pkg.name}/worker.browser';
+      import wasmUrl from '${pkg.name}/wasm-url';
+
+      export async function share(worker: Worker): Promise<void> {
+        const module = await WebAssembly.compileStreaming(fetch(wasmUrl));
+        const init: ElkWorkerInitMessage = { cmd: 'init', module };
+        worker.postMessage(init);
+      }
 
       const graph: ElkNode & { children: ElkNode[] } = { id: 'root', children: [{ id: 'n' }] };
       const edge: ElkExtendedEdge = { id: 'e', sources: ['n'], targets: ['n'] };
@@ -104,5 +111,57 @@ describe('module Web Worker (worker.browser)', () => {
     expect(value.isError).toBe(true);
     expect(value.message).toMatch(/UnsupportedConfigurationException/);
     expect(value.again).toEqual(value.first);
+  });
+
+  // The workers run from a copy of the package without the WASM binary, so they can only lay
+  // out, and recover from a failed layout, with the module the page compiled and sent them.
+  it.skipIf(!bun)('shares one compiled module across workers, through a failed layout', () => {
+    const noBinary = mkdtempSync(path.join(tmpdir(), 'elk-rs-no-binary-'));
+    try {
+      cpSync(path.join(PKG, 'js'), path.join(noBinary, 'js'), { recursive: true });
+      cpSync(path.join(PKG, 'dist', 'wasm'), path.join(noBinary, 'dist', 'wasm'), {
+        recursive: true,
+        filter: (source) => !source.endsWith('.wasm'),
+      });
+      const script = `
+        const ELK = require(${JSON.stringify(path.join(PKG, 'js', 'elk-api.js'))});
+        const { default: wasmUrl } = await import(${JSON.stringify(path.join(PKG, 'js', 'wasm-url.mjs'))});
+        const url = ${JSON.stringify(new URL('js/worker.browser.mjs', `file://${noBinary}/`).href)};
+        const graph = { id: 'root', children: [{ id: 'a', width: 10, height: 10 }, { id: 'b', width: 10, height: 10 }],
+          edges: [{ id: 'e', sources: ['a'], targets: ['b'] }] };
+        const impossible = { id: 'root', children: ['a', 'b'].map((id) => ({ id, width: 10, height: 10,
+          layoutOptions: { 'elk.layered.layering.layerConstraint': 'FIRST' } })),
+          edges: [{ id: 'e1', sources: ['a'], targets: ['b'] }, { id: 'e2', sources: ['b'], targets: ['a'] }] };
+        const module = await WebAssembly.compile(await Bun.file(new URL(wasmUrl)).arrayBuffer());
+        const shared = () => new ELK({ workerFactory: () => {
+          const worker = new Worker(url, { type: 'module' });
+          worker.postMessage({ cmd: 'init', module });
+          return worker;
+        } });
+        const engines = [shared(), shared(), shared()];
+        const unshared = new ELK({ workerFactory: () => new Worker(url, { type: 'module' }) });
+        const layouts = await Promise.all(engines.map((elk) => elk.layout(graph)));
+        const error = await engines[1].layout(impossible).then(() => null, (err) => String(err));
+        const again = await engines[1].layout(graph);
+        const withoutModule = await unshared.layout(graph).then(() => null, (err) => String(err));
+        console.log(JSON.stringify({
+          layouts: layouts.map((out) => out.children.map((c) => [c.x, c.y])),
+          error,
+          again: again.children.map((c) => [c.x, c.y]),
+          withoutModule,
+        }));
+        [...engines, unshared].forEach((elk) => elk.terminateWorker());
+      `;
+      const r = spawnSync(bun, ['-e', script], { encoding: 'utf8', timeout: 9000 });
+      const value = JSON.parse(r.stdout.trim().split('\n').at(-1) || 'null');
+      expect(value, r.stderr).not.toBeNull();
+      expect(value.layouts).toHaveLength(3);
+      expect(new Set(value.layouts.map((layout) => JSON.stringify(layout))).size).toBe(1);
+      expect(value.error).toMatch(/UnsupportedConfigurationException/);
+      expect(value.again).toEqual(value.layouts[1]);
+      expect(value.withoutModule).not.toBeNull();
+    } finally {
+      rmSync(noBinary, { recursive: true, force: true });
+    }
   });
 });
