@@ -371,10 +371,8 @@ impl BarycenterHeuristic {
                 } else {
                     raw_f
                 };
-                let rand_f32 = raw_f as f32;
-                let random_amount = RANDOM_AMOUNT as f32;
-                let perturbation =
-                    (rand_f32 * random_amount - random_amount / 2.0_f32) as f64;
+                // Java computes this in float; elkjs (GWT) in double.
+                let perturbation = raw_f * RANDOM_AMOUNT - RANDOM_AMOUNT / 2.0;
                 state.summed_weight += perturbation;
                 state.barycenter =
                     Some(state.summed_weight / state.degree as f64);
@@ -497,10 +495,8 @@ impl BarycenterHeuristic {
                 } else {
                     raw_f
                 };
-                let rand_f32 = raw_f as f32;
-                let random_amount = RANDOM_AMOUNT as f32;
-                let perturbation =
-                    (rand_f32 * random_amount - random_amount / 2.0_f32) as f64;
+                // Java computes this in float; elkjs (GWT) in double.
+                let perturbation = raw_f * RANDOM_AMOUNT - RANDOM_AMOUNT / 2.0;
                 state.summed_weight += perturbation;
                 state.barycenter =
                     Some(state.summed_weight / state.degree as f64);
@@ -867,7 +863,7 @@ impl BarycenterState {
     }
 }
 
-// Java uses 0.07f (f32 literal). Match f32 precision for parity.
+// Java uses the float literal 0.07f; elkjs keeps its exact value as a double.
 const RANDOM_AMOUNT: f64 = 0.07_f32 as f64;
 
 fn node_id(node: &LNodeRef) -> usize {

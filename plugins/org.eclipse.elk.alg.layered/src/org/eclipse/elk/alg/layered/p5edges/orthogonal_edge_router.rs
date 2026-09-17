@@ -203,7 +203,7 @@ impl ILayoutPhase<LayeredPhases, LGraph> for OrthogonalEdgeRouter {
             }).collect();
             eprintln!("[compound-width] edge_router layers={} detail: {}", layers.len(), layer_info.join(" | "));
         }
-        // Java uses `float xpos` (f32). Truncate through f32 at each step for parity.
+        // Java declares `float xpos`; elkjs (GWT) computes floats as doubles, and so does this.
         let mut xpos: f64 = 0.0;
         let mut left_layer = None;
         let mut left_layer_nodes: Option<Vec<crate::org::eclipse::elk::alg::layered::graph::LNodeRef>> = None;
@@ -229,14 +229,14 @@ impl ILayoutPhase<LayeredPhases, LGraph> for OrthogonalEdgeRouter {
             if let Some(left_layer_ref) = &left_layer {
                 LGraphUtil::place_nodes_horizontally(left_layer_ref, xpos);
                 let left_width = left_layer_ref.lock().size_ref().x;
-                xpos = (xpos + left_width) as f32 as f64;
+                xpos += left_width;
             }
 
             // Java: float startPos = leftLayer == null ? xpos : xpos + edgeNodeSpacing;
             let start_pos = if left_layer.is_none() {
-                xpos as f32 as f64
+                xpos
             } else {
-                (xpos + edge_node_spacing) as f32 as f64
+                xpos + edge_node_spacing
             };
 
             let slots_count = routing_generator.route_edges(
@@ -265,14 +265,13 @@ impl ILayoutPhase<LayeredPhases, LGraph> for OrthogonalEdgeRouter {
                 .unwrap_or(true);
 
             if slots_count > 0 {
-                // Java: float routingWidth — truncate through f32 at each step
-                let mut routing_width =
-                    ((slots_count as f32 - 1.0_f32) * edge_edge_spacing as f32) as f64;
+                // Java: float routingWidth, a double in elkjs
+                let mut routing_width = (slots_count - 1) as f64 * edge_edge_spacing;
                 if left_layer.is_some() {
-                    routing_width = (routing_width as f32 + edge_node_spacing as f32) as f64;
+                    routing_width += edge_node_spacing;
                 }
                 if right_layer.is_some() {
-                    routing_width = (routing_width as f32 + edge_node_spacing as f32) as f64;
+                    routing_width += edge_node_spacing;
                 }
                 if routing_width < node_node_spacing
                     && !is_left_layer_external
@@ -280,9 +279,9 @@ impl ILayoutPhase<LayeredPhases, LGraph> for OrthogonalEdgeRouter {
                 {
                     routing_width = node_node_spacing;
                 }
-                xpos = (xpos + routing_width) as f32 as f64;
+                xpos += routing_width;
             } else if !is_left_layer_external && !is_right_layer_external {
-                xpos = (xpos + node_node_spacing) as f32 as f64;
+                xpos += node_node_spacing;
             }
             if ElkTrace::global().compound_width {
                 eprintln!("[compound-width] edge_router: layer_index={} xpos={} slots={} left_ext={} right_ext={}",
@@ -303,9 +302,9 @@ impl ILayoutPhase<LayeredPhases, LGraph> for OrthogonalEdgeRouter {
         }
 
         if ElkTrace::global().compound_width {
-            eprintln!("[compound-width] edge_router: FINAL xpos={} graph_size_x={}", xpos, xpos as f32 as f64);
+            eprintln!("[compound-width] edge_router: FINAL xpos={} graph_size_x={}", xpos, xpos);
         }
-        layered_graph.size().x = xpos as f32 as f64;
+        layered_graph.size().x = xpos;
         monitor.done();
     }
 

@@ -137,3 +137,43 @@ fn interactive_layout_routes_along_previous_bend_points() {
         ],
     );
 }
+
+/// Java declares some layout arithmetic `float`; elkjs (GWT) computes it in `double`. Port
+/// positions after resizing a node, the orthogonal router's layer positions and crossing
+/// minimization's barycenters follow elkjs.
+#[test]
+fn java_float_arithmetic_is_computed_in_double_like_elkjs() {
+    assert_parity("nested", &["njkgqq"]);
+    assert_parity("routing", &["0lzzm3", "gt4lu1", "gzj0zm", "u5cooj"]);
+}
+
+fn all_ids(group: &str) -> Vec<String> {
+    let mut ids: Vec<String> = std::fs::read_dir(fixture_dir().join(group))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .filter(|name| name.ends_with(".json") && !name.ends_with(".elkjs.json"))
+        .map(|name| name.trim_end_matches(".json").to_string())
+        .collect();
+    ids.sort();
+    ids
+}
+
+fn assert_group_parity(group: &str) {
+    let ids = all_ids(group);
+    assert_parity(group, &ids.iter().map(String::as_str).collect::<Vec<_>>());
+}
+
+#[test]
+fn every_frame_fixture_matches_elkjs() {
+    assert_group_parity("frame");
+}
+
+#[test]
+fn every_nested_fixture_matches_elkjs() {
+    assert_group_parity("nested");
+}
+
+#[test]
+fn every_routing_fixture_matches_elkjs() {
+    assert_group_parity("routing");
+}

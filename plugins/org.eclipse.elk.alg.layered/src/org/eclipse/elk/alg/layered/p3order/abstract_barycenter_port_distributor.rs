@@ -13,12 +13,6 @@ use crate::org::eclipse::elk::alg::layered::p3order::counting::IInitializable;
 use crate::org::eclipse::elk::alg::layered::p3order::cross_min_snapshot::CrossMinSnapshot;
 use crate::org::eclipse::elk::alg::layered::p3order::i_sweep_port_distributor::ISweepPortDistributor;
 
-/// Truncate f64 to f32 precision, matching Java's float[] storage.
-#[inline(always)]
-fn f32t(v: f64) -> f64 {
-    v as f32 as f64
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PortRankStrategy {
     NodeRelative,
@@ -155,10 +149,10 @@ impl AbstractBarycenterPortDistributor {
                                 continue;
                             }
                             if snap.port_side_of(pid) == PortSide::North {
-                                self.port_ranks[pid as usize] = f32t(north_pos);
+                                self.port_ranks[pid as usize] = north_pos;
                                 north_pos -= incr;
                             } else {
-                                self.port_ranks[pid as usize] = f32t(rest_pos);
+                                self.port_ranks[pid as usize] = rest_pos;
                                 rest_pos -= incr;
                             }
                         }
@@ -181,7 +175,7 @@ impl AbstractBarycenterPortDistributor {
                             if snap.port_successors(pid).is_empty() {
                                 continue;
                             }
-                            self.port_ranks[pid as usize] = f32t(pos);
+                            self.port_ranks[pid as usize] = pos;
                             pos += incr;
                         }
                         1.0
@@ -230,10 +224,10 @@ impl AbstractBarycenterPortDistributor {
                     let side = port
                         .lock().side();
                     if side == PortSide::North {
-                        self.port_ranks[pid] = f32t(north_pos);
+                        self.port_ranks[pid] = north_pos;
                         north_pos -= incr;
                     } else {
-                        self.port_ranks[pid] = f32t(rest_pos);
+                        self.port_ranks[pid] = rest_pos;
                         rest_pos -= incr;
                     }
                 }
@@ -262,7 +256,7 @@ impl AbstractBarycenterPortDistributor {
                 for port in output_ports {
                     let pid = port_id(&port);
                     self.ensure_port_capacity(pid);
-                    self.port_ranks[pid] = f32t(pos);
+                    self.port_ranks[pid] = pos;
                     pos += incr;
                 }
                 1.0
@@ -313,10 +307,10 @@ impl AbstractBarycenterPortDistributor {
                                 continue;
                             }
                             if snap.port_side_of(pid) == PortSide::North {
-                                self.port_ranks[pid as usize] = f32t(north_pos);
+                                self.port_ranks[pid as usize] = north_pos;
                                 north_pos -= 1.0;
                             } else {
-                                self.port_ranks[pid as usize] = f32t(rest_pos);
+                                self.port_ranks[pid as usize] = rest_pos;
                                 rest_pos -= 1.0;
                             }
                         }
@@ -330,7 +324,7 @@ impl AbstractBarycenterPortDistributor {
                             continue;
                         }
                         pos += 1.0;
-                        self.port_ranks[pid as usize] = f32t(rank_sum + pos);
+                        self.port_ranks[pid as usize] = rank_sum + pos;
                     }
                     pos
                 }
@@ -376,10 +370,10 @@ impl AbstractBarycenterPortDistributor {
                     let side = port
                         .lock().side();
                     if side == PortSide::North {
-                        self.port_ranks[pid] = f32t(north_pos);
+                        self.port_ranks[pid] = north_pos;
                         north_pos -= 1.0;
                     } else {
-                        self.port_ranks[pid] = f32t(rest_pos);
+                        self.port_ranks[pid] = rest_pos;
                         rest_pos -= 1.0;
                     }
                 }
@@ -395,7 +389,7 @@ impl AbstractBarycenterPortDistributor {
                     pos += 1.0;
                     let pid = port_id(&port);
                     self.ensure_port_capacity(pid);
-                    self.port_ranks[pid] = f32t(rank_sum + pos);
+                    self.port_ranks[pid] = rank_sum + pos;
                 }
                 pos
             }
@@ -566,7 +560,7 @@ impl AbstractBarycenterPortDistributor {
         self.in_layer_port_ids.clear();
         self.min_barycenter = 0.0;
         self.max_barycenter = 0.0;
-        let absurdly_large_float: f32 = (2 * layer_size + 1) as f32;
+        let absurdly_large_float: f64 = (2 * layer_size + 1) as f64;
         let node_layer = snap.node_layer_index(node);
 
         'port_iteration: for &pid in port_ids {
@@ -575,7 +569,7 @@ impl AbstractBarycenterPortDistributor {
             let side = snap.port_side_of(pid);
             if timing { eprintln!("crossmin: port_id={} side={:?}", pid_usize, side); }
             let north_south_port = matches!(side, PortSide::North | PortSide::South);
-            let mut sum: f32 = 0.0;
+            let mut sum: f64 = 0.0;
 
             if north_south_port {
                 // PORT_DUMMY — arena path avoids lock
@@ -597,8 +591,8 @@ impl AbstractBarycenterPortDistributor {
                 };
                 let Some(dummy) = dummy else { continue; };
                 let port_ref = snap.port_ref_opt(pid).unwrap();
-                let contribution = self.deal_with_north_south_ports(absurdly_large_float as f64, port_ref, &dummy);
-                sum += contribution as f32;
+                let contribution = self.deal_with_north_south_ports(absurdly_large_float, port_ref, &dummy);
+                sum += contribution;
                 if timing { eprintln!("crossmin: north_south contribution port_id={} sum={}", pid_usize, sum); }
             } else {
                 for &tgt_pid in snap.port_successors(pid) {
@@ -606,7 +600,7 @@ impl AbstractBarycenterPortDistributor {
                         self.in_layer_port_ids.push(pid);
                         continue 'port_iteration;
                     } else {
-                        sum += self.port_ranks.get(tgt_pid as usize).copied().unwrap_or(0.0) as f32;
+                        sum += self.port_ranks.get(tgt_pid as usize).copied().unwrap_or(0.0);
                     }
                 }
                 for &src_pid in snap.port_predecessors(pid) {
@@ -614,7 +608,7 @@ impl AbstractBarycenterPortDistributor {
                         self.in_layer_port_ids.push(pid);
                         continue 'port_iteration;
                     } else {
-                        sum -= self.port_ranks.get(src_pid as usize).copied().unwrap_or(0.0) as f32;
+                        sum -= self.port_ranks.get(src_pid as usize).copied().unwrap_or(0.0);
                     }
                 }
             }
@@ -622,12 +616,12 @@ impl AbstractBarycenterPortDistributor {
             let degree = snap.port_predecessors(pid).len() as i32 + snap.port_successors(pid).len() as i32;
             self.ensure_port_capacity(pid_usize);
             if degree > 0 {
-                let value = (sum / degree as f32) as f64;
+                let value = sum / degree as f64;
                 self.port_barycenter[pid_usize] = value;
                 self.min_barycenter = self.min_barycenter.min(value);
                 self.max_barycenter = self.max_barycenter.max(value);
             } else if north_south_port {
-                self.port_barycenter[pid_usize] = sum as f64;
+                self.port_barycenter[pid_usize] = sum;
             }
         }
 
@@ -704,23 +698,23 @@ impl AbstractBarycenterPortDistributor {
 
             if in_layer_connections == 0 { continue; }
 
-            let barycenter: f32 = sum as f32 / in_layer_connections as f32;
-            let node_index_f: f32 = node_index_in_layer as f32;
-            let layer_size_f: f32 = layer_size as f32;
+            let barycenter: f64 = sum as f64 / in_layer_connections as f64;
+            let node_index_f: f64 = node_index_in_layer as f64;
+            let layer_size_f: f64 = layer_size as f64;
             let pid_usize = pid as usize;
             let side = snap.port_side_of(pid);
             self.ensure_port_capacity(pid_usize);
             if side == PortSide::East {
                 if barycenter < node_index_f {
-                    self.port_barycenter[pid_usize] = (self.min_barycenter as f32 - barycenter) as f64;
+                    self.port_barycenter[pid_usize] = self.min_barycenter - barycenter;
                 } else {
-                    self.port_barycenter[pid_usize] = (self.max_barycenter as f32 + (layer_size_f - barycenter)) as f64;
+                    self.port_barycenter[pid_usize] = self.max_barycenter + (layer_size_f - barycenter);
                 }
             } else if side == PortSide::West {
                 if barycenter < node_index_f {
-                    self.port_barycenter[pid_usize] = (self.max_barycenter as f32 + barycenter) as f64;
+                    self.port_barycenter[pid_usize] = self.max_barycenter + barycenter;
                 } else {
-                    self.port_barycenter[pid_usize] = (self.min_barycenter as f32 - (layer_size_f - barycenter)) as f64;
+                    self.port_barycenter[pid_usize] = self.min_barycenter - (layer_size_f - barycenter);
                 }
             }
         }
@@ -762,7 +756,7 @@ impl AbstractBarycenterPortDistributor {
         self.min_barycenter = 0.0;
         self.max_barycenter = 0.0;
         // Java: final float absurdlyLargeFloat = 2 * layer.getNodes().size() + 1;
-        let absurdly_large_float: f32 = (2 * self.layer_size(node) + 1) as f32;
+        let absurdly_large_float: f64 = (2 * self.layer_size(node) + 1) as f64;
         let timing = ElkTrace::global().crossmin_timing;
 
         if self.snapshot.is_some() {
@@ -779,7 +773,7 @@ impl AbstractBarycenterPortDistributor {
         &mut self,
         snap: &CrossMinSnapshot,
         node_layer: u32,
-        absurdly_large_float: f32,
+        absurdly_large_float: f64,
         timing: bool,
         _node: &LNodeRef,
         ports: &[LPortRef],
@@ -795,7 +789,7 @@ impl AbstractBarycenterPortDistributor {
                 eprintln!("crossmin: port_id={} side={:?}", pid_usize, side);
             }
             let north_south_port = matches!(side, PortSide::North | PortSide::South);
-            let mut sum: f32 = 0.0;
+            let mut sum: f64 = 0.0;
 
             if north_south_port {
                 let dummy = {
@@ -806,8 +800,8 @@ impl AbstractBarycenterPortDistributor {
                     continue;
                 };
                 let contribution =
-                    self.deal_with_north_south_ports(absurdly_large_float as f64, port, &dummy);
-                sum += contribution as f32;
+                    self.deal_with_north_south_ports(absurdly_large_float, port, &dummy);
+                sum += contribution;
                 if timing {
                     eprintln!(
                         "crossmin: north_south contribution port_id={} sum={}",
@@ -825,7 +819,7 @@ impl AbstractBarycenterPortDistributor {
                             .port_ranks
                             .get(tgt_pid as usize)
                             .copied()
-                            .unwrap_or(0.0) as f32;
+                            .unwrap_or(0.0);
                     }
                 }
                 // Incoming edges: predecessors in CSR
@@ -838,7 +832,7 @@ impl AbstractBarycenterPortDistributor {
                             .port_ranks
                             .get(src_pid as usize)
                             .copied()
-                            .unwrap_or(0.0) as f32;
+                            .unwrap_or(0.0);
                     }
                 }
             }
@@ -847,19 +841,19 @@ impl AbstractBarycenterPortDistributor {
                 snap.port_predecessors(pid).len() as i32 + snap.port_successors(pid).len() as i32;
             self.ensure_port_capacity(pid_usize);
             if degree > 0 {
-                let value = (sum / degree as f32) as f64;
+                let value = sum / degree as f64;
                 self.port_barycenter[pid_usize] = value;
                 self.min_barycenter = self.min_barycenter.min(value);
                 self.max_barycenter = self.max_barycenter.max(value);
             } else if north_south_port {
-                self.port_barycenter[pid_usize] = sum as f64;
+                self.port_barycenter[pid_usize] = sum;
             }
         }
     }
 
     fn iterate_ports_lock(
         &mut self,
-        absurdly_large_float: f32,
+        absurdly_large_float: f64,
         timing: bool,
         node: &LNodeRef,
         ports: &[LPortRef],
@@ -875,7 +869,7 @@ impl AbstractBarycenterPortDistributor {
                 eprintln!("crossmin: port_id={} side={:?}", pid, side);
             }
             let north_south_port = matches!(side, PortSide::North | PortSide::South);
-            let mut sum: f32 = 0.0;
+            let mut sum: f64 = 0.0;
 
             if north_south_port {
                 let dummy = {
@@ -886,8 +880,8 @@ impl AbstractBarycenterPortDistributor {
                     continue;
                 };
                 let contribution =
-                    self.deal_with_north_south_ports(absurdly_large_float as f64, port, &dummy);
-                sum += contribution as f32;
+                    self.deal_with_north_south_ports(absurdly_large_float, port, &dummy);
+                sum += contribution;
                 if timing {
                     eprintln!(
                         "crossmin: north_south contribution port_id={} sum={}",
@@ -907,7 +901,7 @@ impl AbstractBarycenterPortDistributor {
                         continue 'port_iteration;
                     } else {
                         let pid = port_id(&connected_port);
-                        sum += self.port_ranks.get(pid).copied().unwrap_or(0.0) as f32;
+                        sum += self.port_ranks.get(pid).copied().unwrap_or(0.0);
                     }
                 }
                 let incoming_edges = connected_incoming_edges(port);
@@ -923,7 +917,7 @@ impl AbstractBarycenterPortDistributor {
                         continue 'port_iteration;
                     } else {
                         let pid = port_id(&connected_port);
-                        sum -= self.port_ranks.get(pid).copied().unwrap_or(0.0) as f32;
+                        sum -= self.port_ranks.get(pid).copied().unwrap_or(0.0);
                     }
                 }
             }
@@ -935,12 +929,12 @@ impl AbstractBarycenterPortDistributor {
             let pid = port_id(port);
             self.ensure_port_capacity(pid);
             if degree > 0 {
-                let value = (sum / degree as f32) as f64;
+                let value = sum / degree as f64;
                 self.port_barycenter[pid] = value;
                 self.min_barycenter = self.min_barycenter.min(value);
                 self.max_barycenter = self.max_barycenter.max(value);
             } else if north_south_port {
-                self.port_barycenter[pid] = sum as f64;
+                self.port_barycenter[pid] = sum;
             }
         }
     }
@@ -988,9 +982,9 @@ impl AbstractBarycenterPortDistributor {
                 continue;
             }
             // Java: float barycenter = (float) sum / inLayerConnections;
-            let barycenter: f32 = sum as f32 / in_layer_connections as f32;
-            let node_index_f: f32 = node_index_in_layer as f32;
-            let layer_size_f: f32 = layer_size as f32;
+            let barycenter: f64 = sum as f64 / in_layer_connections as f64;
+            let node_index_f: f64 = node_index_in_layer as f64;
+            let layer_size_f: f64 = layer_size as f64;
             let pid = self.snap_port_id(port);
             let side = if let Some(ref snap) = self.snapshot {
                 snap.port_side_of(pid as u32)
@@ -1002,18 +996,18 @@ impl AbstractBarycenterPortDistributor {
             if side == PortSide::East {
                 if barycenter < node_index_f {
                     self.port_barycenter[pid] =
-                        (self.min_barycenter as f32 - barycenter) as f64;
+                        self.min_barycenter - barycenter;
                 } else {
                     self.port_barycenter[pid] =
-                        (self.max_barycenter as f32 + (layer_size_f - barycenter)) as f64;
+                        self.max_barycenter + (layer_size_f - barycenter);
                 }
             } else if side == PortSide::West {
                 if barycenter < node_index_f {
                     self.port_barycenter[pid] =
-                        (self.max_barycenter as f32 + barycenter) as f64;
+                        self.max_barycenter + barycenter;
                 } else {
                     self.port_barycenter[pid] =
-                        (self.min_barycenter as f32 - (layer_size_f - barycenter)) as f64;
+                        self.min_barycenter - (layer_size_f - barycenter);
                 }
             }
         }

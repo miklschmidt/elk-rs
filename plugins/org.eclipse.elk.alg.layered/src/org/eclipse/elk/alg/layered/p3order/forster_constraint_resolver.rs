@@ -305,8 +305,8 @@ impl ForsterConstraintResolver {
                 for predecessor in incoming {
                     let pred_bary = self.group_barycenter(predecessor).unwrap_or(0.0);
                     let group_bary = self.group_barycenter(group_id).unwrap_or(0.0);
-                    // Java compares via .floatValue() (f32 truncation)
-                    if (pred_bary as f32) == (group_bary as f32) {
+                    // Java compares via .floatValue(), which is the double itself in elkjs (GWT)
+                    if pred_bary == group_bary {
                         let pred_index = index_map
                             .get(&predecessor)
                             .copied()
